@@ -1,0 +1,5 @@
+# Normalize to LF: configs, Dockerfiles and scripts run inside Linux containers.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pcap binary
