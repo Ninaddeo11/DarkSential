@@ -24,7 +24,7 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0  # publishes full version tags only
         with:
           version: "0.12.17"
           python-version: ${{ matrix.python }}
@@ -68,7 +68,7 @@ jobs:
     needs: backend
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0  # publishes full version tags only
         with:
           version: "0.12.17"
           python-version: "3.13"
