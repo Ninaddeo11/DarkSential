@@ -54,7 +54,7 @@ plugins = ["pydantic.mypy"]
 # The native parser ships a compiled DLL that Windows Application Control
 # policies may block; the pure-Python parser is portable and fast enough here.
 native_parser = false
-files = ["app", "tests"]
+files = ["app", "tests", "../api"]
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

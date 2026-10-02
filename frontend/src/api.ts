@@ -13,6 +13,7 @@ export interface Liveness {
   status: "ok";
   version: string;
   env: string;
+  deployment: "lab" | "hosted";
   dry_run: boolean;
   offline_mode: boolean;
 }

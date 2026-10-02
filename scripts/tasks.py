@@ -62,8 +62,17 @@ def setup() -> None:
 
 @task
 def lint() -> None:
-    run(["uv", "run", "ruff", "check", "."], cwd=BACKEND)
-    run(["uv", "run", "ruff", "format", "--check", "."], cwd=BACKEND)
+    run(["uv", "run", "ruff", "check", ".", "../api"], cwd=BACKEND)
+    run(["uv", "run", "ruff", "format", "--check", ".", "../api"], cwd=BACKEND)
+
+
+EXPORT_REQS = ["uv", "export", "--frozen", "--no-dev", "--no-hashes", "--no-emit-project", "-q"]
+
+
+@task
+def export_reqs() -> None:
+    """Regenerate root requirements.txt (used by Vercel) from backend/uv.lock."""
+    run([*EXPORT_REQS, "-o", "../requirements.txt"], cwd=BACKEND)
 
 
 @task
@@ -88,8 +97,8 @@ def check() -> None:
 
 @task
 def fmt() -> None:
-    run(["uv", "run", "ruff", "check", "--fix", "."], cwd=BACKEND)
-    run(["uv", "run", "ruff", "format", "."], cwd=BACKEND)
+    run(["uv", "run", "ruff", "check", "--fix", ".", "../api"], cwd=BACKEND)
+    run(["uv", "run", "ruff", "format", ".", "../api"], cwd=BACKEND)
 
 
 @task

@@ -32,8 +32,12 @@ jobs:
       - run: uv sync --frozen
       - name: ruff
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
+          uv run ruff check . ../api
+          uv run ruff format --check . ../api
+      - name: requirements.txt in sync with uv.lock (Vercel)
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project -q -o ../requirements.txt
+          git diff --exit-code ../requirements.txt
       - name: mypy (strict)
         run: uv run mypy
       - name: pytest (coverage gate 80%)

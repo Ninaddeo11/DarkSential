@@ -73,12 +73,13 @@ with mitigations. Status: ✅ in place · ⏳ planned (phase).
 | O4 | **Header injection** via `X-Request-ID`. | Accepted only if it parses as a UUID, otherwise regenerated ✅ (tested). |
 | O5 | **Recon** via OpenAPI or docs in production. | Disabled when `env=production` ✅. |
 | O6 | **Brute force / DoS on the API.** | Rate limits (⏳P6). |
+| O7 | **Hosted (Vercel) API is internet-facing**, not localhost-bound. | Hosted mode is forced by the entrypoint and dry-run only ✅ (tested). `env=production` defaults there, so OpenAPI is off ✅. HSTS/CSP via `vercel.json` ✅. Phase 0 exposes only health data (version, mode). **No mutating endpoint may be routed in hosted mode until auth lands (⏳P6).** |
 
 ### Enforcement layer (TB5)
 
 | ID | Abuse case | Mitigations |
 |---|---|---|
-| E1 | **Self-lockout or mass quarantine** from a bug or poisoned intel. | DRY_RUN=true by default ✅, logged loudly when disabled ✅. Protected hosts (⏳P4). Quarantine has a mandatory duration and auto-recovery (⏳P4). Manual override (⏳P4). |
+| E1 | **Self-lockout or mass quarantine** from a bug or poisoned intel. | DRY_RUN=true by default ✅, cannot be disabled in hosted mode ✅, logged loudly when disabled ✅. Protected hosts (⏳P4). Quarantine has a mandatory duration and auto-recovery (⏳P4). Manual override (⏳P4). |
 | E2 | **Firewall state drift** after a crash, leaving devices quarantined forever or released early. | Desired state persisted in DB, reconciled at startup, atomic nft set operations (⏳P4). |
 | E3 | **Privilege creep:** the API process holds `NET_ADMIN`. | API container drops all caps ✅. Enforcement goes to a separate minimal-privilege component (⏳P4). |
 | E4 | **Repudiation:** "who quarantined this?" | Append-only audit log with actor, reason and evidence (⏳P4). |

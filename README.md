@@ -51,6 +51,27 @@ make up             # mosquitto, neo4j, backend, frontend (all bound to 127.0.0.
 make down
 ```
 
+### Deploy to Vercel (hosted mode)
+
+The repo root is a ready Vercel project: the frontend is served statically from
+`frontend/dist`, and the FastAPI app runs as a Python function at `/api/*`
+([api/index.py](api/index.py), [vercel.json](vercel.json)).
+
+1. Import the GitHub repo in Vercel. Keep the root directory at the repo root;
+   the build settings come from `vercel.json`.
+2. Add the environment variable `DSN_DEVICE_ID_HMAC_KEY` (`make gen-key`). It is
+   the only required one.
+3. Deploy, then check `https://<project>.vercel.app/api/health`.
+
+Hosted mode is **forced** by the entrypoint and is dry-run only:
+`DSN_DRY_RUN=false` makes the function refuse to start. A cloud function can't
+reach your lab network, hold MQTT connections, run nftables or keep persistent
+schedulers, so enforcement, discovery and the broker stay on the lab
+deployment (`make up`). Use Vercel for the dashboard and read-only intel views.
+
+`requirements.txt` at the root is generated from `backend/uv.lock`
+(`make export-reqs`), and CI fails if the two drift apart.
+
 ## Configuration
 
 All settings come from environment variables prefixed `DSN_` (see

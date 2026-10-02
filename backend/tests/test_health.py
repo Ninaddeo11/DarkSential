@@ -19,6 +19,7 @@ def test_liveness(client: TestClient) -> None:
         "status": "ok",
         "version": __version__,
         "env": "test",
+        "deployment": "lab",
         "dry_run": True,
         "offline_mode": True,
     }

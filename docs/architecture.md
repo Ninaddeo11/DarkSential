@@ -83,6 +83,23 @@ Status markers: ✅ implemented · ⏳ planned (phase noted).
 
 ## Deployment
 
+There are two deployment modes (`DSN_DEPLOYMENT`):
+
+| | `lab` (docker-compose) | `hosted` (Vercel) |
+|---|---|---|
+| Frontend | nginx container | Vercel static (`frontend/dist`) |
+| API | long-running uvicorn | Python serverless function (`api/index.py`) |
+| Enforcement | allowed when `DRY_RUN=false` | **rejected at startup**: dry-run only |
+| Discovery / MQTT / scheduler | yes (later phases) | no (no LAN access, no long-lived processes) |
+| Intended use | full platform | dashboard and read-only intel views |
+
+The Vercel entrypoint *forces* `hosted` (it overwrites any configured value), and
+settings validation makes `hosted` combined with `DRY_RUN=false` a startup error.
+Later phases must keep stateful subsystems (scheduler, MQTT consumer, response
+drivers) out of the hosted import path, or gate them on `deployment == "lab"`.
+
+### Lab stack
+
 `infra/docker-compose.yml` runs Mosquitto, Neo4j, the backend and the frontend
 (nginx) on a private bridge network. Published ports bind to `127.0.0.1` only.
 Backend and frontend containers run as non-root with all capabilities dropped,

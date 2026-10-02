@@ -42,6 +42,10 @@ class Settings(BaseSettings):
 
     # --- Runtime ---------------------------------------------------------------
     env: Literal["development", "test", "production"] = "development"
+    # "lab": runs next to the lab network (docker-compose) and may enforce.
+    # "hosted": serverless/cloud (e.g. Vercel). It cannot reach the lab, so it is
+    # pinned to dry-run and never touches a network.
+    deployment: Literal["lab", "hosted"] = "lab"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_json: bool = True
     dry_run: bool = True
@@ -120,6 +124,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _paired_credentials(self) -> Settings:
+        if self.deployment == "hosted" and not self.dry_run:
+            raise ValueError("hosted deployments are dry-run only; enforcement requires 'lab'")
         if self.neo4j_uri and self.neo4j_password is None:
             raise ValueError("neo4j_password is required when neo4j_uri is set")
         if self.mqtt_host and (self.mqtt_username is None or self.mqtt_password is None):

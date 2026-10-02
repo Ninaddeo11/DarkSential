@@ -17,6 +17,7 @@ class LivenessResponse(BaseModel):
     status: Literal["ok"]
     version: str
     env: str
+    deployment: str
     dry_run: bool
     offline_mode: bool
 
@@ -33,6 +34,7 @@ def liveness(request: Request) -> LivenessResponse:
         status="ok",
         version=__version__,
         env=settings.env,
+        deployment=settings.deployment,
         dry_run=settings.dry_run,
         offline_mode=settings.offline_mode,
     )

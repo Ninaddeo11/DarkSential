@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Vercel deployment: `vercel.json` (static frontend, FastAPI function at
+  `/api/*`, security headers, SPA fallback), `api/index.py`, `.vercelignore`,
+  and a root `requirements.txt` exported from `uv.lock` with a CI drift check.
+- `DSN_DEPLOYMENT` (`lab` | `hosted`). Hosted is forced by the Vercel
+  entrypoint, and settings validation rejects it with `DRY_RUN=false`.
+  `/api/health` now reports `deployment`.
+
+### Fixed
+- CI: pin `astral-sh/setup-uv@v10.2.0`. That action publishes no floating major tag.
+
+### Known limitations
+- The Vercel deployment was not run end to end (no Vercel account linked in
+  this environment). The entrypoint is covered by tests with Vercel-like env vars.
+
 ## [0.1.0] Phase 0: Scaffold, 2026-10-02
 
 ### Added

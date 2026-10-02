@@ -45,7 +45,7 @@ export function App() {
 
       {live && (
         <p className="meta">
-          v{live.version} · env {live.env} · feeds {live.offline_mode ? "offline (mocks)" : "online"}
+          v{live.version} · env {live.env} · {live.deployment} · feeds {live.offline_mode ? "offline (mocks)" : "online"}
         </p>
       )}
 
