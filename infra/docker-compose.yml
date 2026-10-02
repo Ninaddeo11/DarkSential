@@ -1,0 +1,77 @@
+# Darknet Sentinel Nexus - local lab stack.
+# Run from the repo root so .env is used for interpolation:
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d
+# All published ports bind to 127.0.0.1 only.
+name: dsn
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+    networks: [backplane]
+    # Not published in Phase 0. Phase 5 publishes 8883 (TLS) for the ESP32 node.
+
+  neo4j:
+    image: neo4j:5.26.31-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:?set NEO4J_AUTH in .env}
+      NEO4J_server_memory_heap_max__size: 1G
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j-data:/data
+    networks: [backplane]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DSN_API_HOST: 0.0.0.0
+      DSN_DATABASE_URL: sqlite:////srv/data/dsn.sqlite3
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - backend-data:/srv/data
+      - ../fixtures:/srv/fixtures:ro
+    networks: [backplane]
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  frontend:
+    build: ../frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:8080"
+    networks: [backplane]
+    depends_on:
+      backend:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  backplane: {}
+
+volumes:
+  mosquitto-data: {}
+  neo4j-data: {}
+  backend-data: {}

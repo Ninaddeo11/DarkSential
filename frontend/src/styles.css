@@ -1,0 +1,52 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0f14;
+  --fg: #d8e1ea;
+  --muted: #7d8b99;
+  --line: #1e2833;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+h1 { font-size: 1.4rem; margin: 0; }
+h2 { font-size: 1rem; margin: 24px 0 8px; }
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.badge.safe { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.badge.danger { background: color-mix(in srgb, var(--bad) 25%, transparent); color: var(--bad); }
+
+.meta, footer { color: var(--muted); font-size: 0.85rem; }
+footer { margin-top: 32px; }
+.error { color: var(--bad); }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.status.ok { color: var(--ok); }
+.status.degraded, .status.not_configured { color: var(--warn); }
+.status.error { color: var(--bad); }

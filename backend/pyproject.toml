@@ -1,0 +1,78 @@
+[project]
+name = "darknet-sentinel-nexus"
+version = "0.1.0"
+description = "Defensive, explainable IoT security platform for an owned lab network."
+requires-python = ">=3.11"
+# Direct dependencies are pinned exactly; transitive pins live in uv.lock.
+# Dependencies are added in the phase that first uses them.
+dependencies = [
+    "fastapi==0.142.2",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2==2.13.1",  # starlette's TestClient transport
+    "mypy==2.4.0",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.10",
+]
+
+[tool.uv]
+# Application, not a library: run from source, nothing to build or publish.
+package = false
+
+# --- ruff ---------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle / pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "S",             # bandit (security)
+    "SIM",           # simplify
+    "RUF",
+    "ANN",           # annotations
+    "PT",            # pytest style
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "ANN"]
+
+# --- mypy ---------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+# The native parser ships a compiled DLL that Windows Application Control
+# policies may block; the pure-Python parser is portable and fast enough here.
+native_parser = false
+files = ["app", "tests"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# --- pytest / coverage --------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
