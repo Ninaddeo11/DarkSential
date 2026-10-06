@@ -46,16 +46,13 @@ def _require(tool: str) -> None:
 def setup() -> None:
     """Install backend and frontend dependencies."""
     _require("uv")
-    run(["uv", "sync", "--frozen"], cwd=BACKEND)
+    run(["uv", "sync", "--frozen", "--all-extras"], cwd=BACKEND)
     run([NPM, "ci"], cwd=FRONTEND)
     env_file = ROOT / ".env"
     if not env_file.exists():
         text = (ROOT / ".env.example").read_text(encoding="utf-8")
         text = text.replace("DSN_DEVICE_ID_HMAC_KEY=\n", f"DSN_DEVICE_ID_HMAC_KEY={secrets.token_urlsafe(48)}\n")
-        text = text.replace(
-            "NEO4J_AUTH=neo4j/change-me-to-a-long-random-password",
-            f"NEO4J_AUTH=neo4j/{secrets.token_urlsafe(24)}",
-        )
+        text = text.replace("change-me-to-a-long-random-password", secrets.token_urlsafe(24))
         env_file.write_text(text, encoding="utf-8")
         print("created .env with freshly generated secrets")
 
@@ -119,6 +116,86 @@ def up() -> None:
 @task
 def down() -> None:
     run([*COMPOSE, "down"])
+
+
+@task
+def demo_phase1() -> None:
+    """Offline end-to-end intel demo: fixtures -> STIX 2.1 -> graph -> queries."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DSN_")}
+    env["DSN_DEVICE_ID_HMAC_KEY"] = secrets.token_urlsafe(48)
+    run(["uv", "run", "python", "-m", "app.cli", "demo-phase1"], cwd=BACKEND, env=env)
+
+
+# --- Linux containers: for hosts that can't load spaCy's compiled extensions -------
+
+DEV_IMAGE = "ghcr.io/astral-sh/uv:0.12.17-python3.13-trixie-slim"
+NEO4J_IMAGE = "neo4j:5.26.31-community"
+TEST_NET = "dsn-test"
+TEST_NEO4J = "dsn-test-neo4j"
+TEST_NEO4J_PASSWORD = "dsn-test-password"  # throwaway container, never published
+
+
+def _docker_backend(command: str, extra_env: dict[str, str] | None = None) -> None:
+    _require("docker")
+    env_flags = [f"-e{k}={v}" for k, v in (extra_env or {}).items()]
+    run(
+        [
+            "docker", "run", "--rm", "--network", TEST_NET,
+            "-v", f"{ROOT}:/repo", "-v", "dsn-venv:/venv", "-v", "dsn-uv-cache:/root/.cache/uv",
+            "-e", "UV_PROJECT_ENVIRONMENT=/venv", "-e", "UV_LINK_MODE=copy",
+            *env_flags, "-w", "/repo/backend", DEV_IMAGE,
+            "sh", "-c", f"uv sync --frozen --all-extras -q && {command}",
+        ]
+    )
+
+
+def _start_test_neo4j() -> None:
+    subprocess.run(["docker", "network", "create", TEST_NET], capture_output=True, check=False)
+    subprocess.run(["docker", "rm", "-f", TEST_NEO4J], capture_output=True, check=False)
+    run(
+        [
+            "docker", "run", "-d", "--name", TEST_NEO4J, "--network", TEST_NET,
+            "-e", f"NEO4J_AUTH=neo4j/{TEST_NEO4J_PASSWORD}", NEO4J_IMAGE,
+        ]
+    )
+    for _ in range(90):
+        probe = subprocess.run(
+            ["docker", "exec", TEST_NEO4J, "cypher-shell", "-u", "neo4j", "-p",
+             TEST_NEO4J_PASSWORD, "RETURN 1"],
+            capture_output=True, check=False,
+        )
+        if probe.returncode == 0:
+            return
+        time.sleep(2)
+    sys.exit("neo4j did not become ready")
+
+
+@task
+def docker_test() -> None:
+    """Full test suite on Linux with spaCy and a throwaway Neo4j (PYTEST_ARGS to narrow)."""
+    _start_test_neo4j()
+    args = os.environ.get("PYTEST_ARGS", "--cov --cov-report=term-missing")
+    try:
+        _docker_backend(
+            f"uv run pytest {args}",
+            {
+                "DSN_TEST_NEO4J_URI": f"bolt://{TEST_NEO4J}:7687",
+                "DSN_TEST_NEO4J_USER": "neo4j",
+                "DSN_TEST_NEO4J_PASSWORD": TEST_NEO4J_PASSWORD,
+            },
+        )
+    finally:
+        subprocess.run(["docker", "rm", "-f", TEST_NEO4J], capture_output=True, check=False)
+
+
+@task
+def docker_demo_phase1() -> None:
+    """demo-phase1 inside a Linux container."""
+    subprocess.run(["docker", "network", "create", TEST_NET], capture_output=True, check=False)
+    _docker_backend(
+        "uv run python -m app.cli demo-phase1",
+        {"DSN_DEVICE_ID_HMAC_KEY": secrets.token_urlsafe(48)},
+    )
 
 
 @task

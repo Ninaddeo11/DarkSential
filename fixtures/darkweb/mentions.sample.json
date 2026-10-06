@@ -1,0 +1,47 @@
+{
+  "_comment": "SYNTHETIC dark-web-style mentions for the generic REST adapter and NLP tests. Written by hand; no real forum content. Includes defanged IOCs, noise and adversarial strings (zero-width chars, fullwidth digits, Cypher/HTML injection, ANSI escapes).",
+  "data": [
+    {
+      "id": "dw-0001",
+      "source": "forum-alpha",
+      "published_at": "2026-09-30T18:22:00Z",
+      "text": "Selling access to 3k TP-Link Archer AX21 routers, popped via CVE-2023-1389. Loader pulls from hxxp://192.0.2[.]45:8080/bins/mirai.arm7, C2 at c2.bad-iot[.]example[.]org. TTPs: T1190 then T1105."
+    },
+    {
+      "id": "dw-0002",
+      "source": "paste-site",
+      "published_at": "2026-09-29T09:00:00Z",
+      "text": "Old Emotet (aka Geodo) tier-1 node 162.243.103[.]246 still answering on 8080. Sample md5 5d41402abc4b2a76b9719d911017c592. Ops attributed to Sandworm Team?? doubt it, more like QBot crew."
+    },
+    {
+      "id": "dw-0003",
+      "source": "forum-alpha",
+      "published_at": "2026-09-28T12:00:00Z",
+      "text": "Hikvision cams CVE-2021-36260 mass-scan list, brute force with T1110.001 against telnet. IPv6 relay at 2001:db8:dead:beef::17."
+    },
+    {
+      "id": "dw-0004",
+      "source": "chat-relay",
+      "published_at": "2026-09-27T23:59:59Z",
+      "text": "noise noise version 1.2.3.4 of the tool, config.json and update.exe are not domains. CVE-1999-0001x is not a CVE. T12345 is not a technique. ../../etc/passwd"
+    },
+    {
+      "id": "dw-0005",
+      "source": "chat-relay",
+      "published_at": "2026-09-27T10:00:00Z",
+      "text": "evil CVE​-2014-8361 hidden with zero width, fullwidth ＣＶＥ－２０２１－４４２２８, <script>alert(1)</script> '; MATCH (n) DETACH DELETE n // \u001b[31mRED\u001b[0m"
+    },
+    {
+      "id": "dw-0006",
+      "source": "forum-beta",
+      "published_at": "not-a-date",
+      "text": "Mention with an unparseable date must still ingest using fetch time. Domain bad-iot.example.org mentioned in clear."
+    },
+    {
+      "id": "dw-0007",
+      "source": "forum-beta",
+      "published_at": "2026-09-26T00:00:00Z",
+      "text": ""
+    }
+  ]
+}

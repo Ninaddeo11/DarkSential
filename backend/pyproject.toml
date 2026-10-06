@@ -5,20 +5,37 @@ description = "Defensive, explainable IoT security platform for an owned lab net
 requires-python = ">=3.11"
 # Direct dependencies are pinned exactly; transitive pins live in uv.lock.
 # Dependencies are added in the phase that first uses them.
+#
+# Core = what the API needs in every deployment (including Vercel "hosted").
+# Lab-only code imports the `lab` extra lazily, so the hosted function stays small.
 dependencies = [
     "fastapi==0.142.2",
     "uvicorn[standard]==0.54.0",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
+    "pyyaml==6.0.3",
+]
+
+[project.optional-dependencies]
+lab = [
+    "apscheduler==3.11.3",
+    "httpx2==2.13.1",
+    "neo4j==6.3.1",
+    "spacy==3.8.16",
+    "sqlalchemy==2.1.2",
+    "stix2==3.0.2",
+    "stix2-patterns==2.1.2",
 ]
 
 [dependency-groups]
 dev = [
     "httpx2==2.13.1",  # starlette's TestClient transport
+    "hypothesis==6.168.3",
     "mypy==2.4.0",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "ruff==0.16.10",
+    "types-pyyaml==6.0.12.20260906",
 ]
 
 [tool.uv]
@@ -43,8 +60,12 @@ select = [
     "PT",            # pytest style
 ]
 
+ignore = [
+    "ANN401",  # raw feed payloads are untyped JSON; `Any` is the honest type at that boundary
+]
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "ANN"]
+"tests/**" = ["S101", "S105", "S106", "S311", "S603", "ANN"]  # seeded RNGs; fixed-arg subprocess
 
 # --- mypy ---------------------------------------------------------------------
 [tool.mypy]
@@ -56,6 +77,11 @@ plugins = ["pydantic.mypy"]
 native_parser = false
 files = ["app", "tests", "../api"]
 
+[[tool.mypy.overrides]]
+# Untyped third-party packages.
+module = ["stix2.*", "stix2patterns.*", "apscheduler.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
@@ -66,6 +92,7 @@ warn_required_dynamic_aliases = true
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
 filterwarnings = ["error"]
+markers = ["neo4j: needs a Neo4j server (DSN_TEST_NEO4J_URI)"]
 
 [tool.coverage.run]
 source = ["app"]

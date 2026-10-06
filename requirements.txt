@@ -34,7 +34,9 @@ python-dotenv==1.2.4
     #   pydantic-settings
     #   uvicorn
 pyyaml==6.0.3
-    # via uvicorn
+    # via
+    #   darknet-sentinel-nexus
+    #   uvicorn
 starlette==1.7.0
     # via fastapi
 typing-extensions==4.16.0

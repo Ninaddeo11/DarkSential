@@ -14,7 +14,7 @@ streams everything to a real-time 3D command center.
 | Phase | Scope | State |
 |---|---|---|
 | 0 | Scaffold, config, logging, health, CI, architecture and threat model | ✅ done |
-| 1 | Threat-intel feeds → STIX 2.1 → Neo4j, NLP | ⏳ |
+| 1 | Threat-intel feeds → STIX 2.1 → Neo4j, NLP | ✅ done (awaiting review) |
 | 2 | Device discovery and behavior baselines | ⏳ |
 | 3 | Explainable risk engine | ⏳ |
 | 4 | Quarantine and recovery | ⏳ |
@@ -28,13 +28,49 @@ Requirements: Python ≥ 3.11, [uv](https://docs.astral.sh/uv/) 0.12+, Node 24, 
 (optionally) Docker.
 
 ```bash
-make setup          # install deps; creates .env with generated secrets if missing
+make setup          # install deps (incl. the `lab` extra); creates .env with generated secrets
 make demo-phase0    # boot the API offline, print health/readiness, shut down
+make demo-phase1    # offline intel demo: 7 feeds -> STIX 2.1 -> graph -> queries + NLP
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
+make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
 ```
 
 Windows without `make`: use `python scripts/tasks.py <task>`, for example
 `python scripts/tasks.py demo-phase0`. Run `python scripts/tasks.py` to list tasks.
+
+> **Windows Smart App Control / Application Control** can block spaCy's compiled
+> extensions. NLP tests then skip locally, and `demo-phase1` finishes without the
+> NLP step. Use `make docker-test` / `make docker-demo-phase1` to run the full
+> suite and demo on Linux. CI always runs everything.
+
+### Threat intel (Phase 1)
+
+Feeds run on a persistent schedule (`backend/config/feeds.yaml`). Offline mode
+(the default) replays `/fixtures` through the real parsers. For live mode, set
+`DSN_OFFLINE_MODE=false` and the keys you have:
+
+| Feed | Needs |
+|---|---|
+| CISA KEV, MITRE ATT&CK, Feodo Tracker | nothing |
+| NVD | optional `DSN_NVD_API_KEY` (raises the rate limit) |
+| URLhaus, ThreatFox | `DSN_ABUSECH_AUTH_KEY` (free at auth.abuse.ch) |
+| Dark-web provider | `DSN_DARKWEB_API_URL`, `DSN_DARKWEB_API_KEY`, plus the field mapping (`DSN_DARKWEB_*`) |
+
+Feeds whose key is missing are reported as `missing_credentials` and skipped.
+
+```bash
+cd backend
+uv run python -m app.cli ingest                 # run all enabled feeds now
+uv run python -m app.cli related 162.243.103.246
+uv run python -m app.cli cves "cpe:2.3:o:tp-link:archer_ax21_firmware:1.1.1:*:*:*:*:*:*:*"
+uv run python -m app.cli extract "C2 at evil[.]example[.]com, CVE-2023-1389, T1190"
+```
+
+Read-only API (lab mode): `GET /api/feeds/status`,
+`GET /api/intel/related-threats?ioc=`, `GET /api/intel/cves?cpe=`,
+`GET /api/intel/techniques?rule_id=`, `GET /api/intel/graph/counts`,
+`POST /api/intel/extract`. Without `DSN_NEO4J_URI` the graph is in-memory and is
+lost on restart. With `make up`, Neo4j is wired in automatically.
 
 ### Local development
 
@@ -67,7 +103,9 @@ Hosted mode is **forced** by the entrypoint and is dry-run only:
 `DSN_DRY_RUN=false` makes the function refuse to start. A cloud function can't
 reach your lab network, hold MQTT connections, run nftables or keep persistent
 schedulers, so enforcement, discovery and the broker stay on the lab
-deployment (`make up`). Use Vercel for the dashboard and read-only intel views.
+deployment (`make up`). Use Vercel for the dashboard. In hosted mode
+`/api/feeds/status` shows configuration only, and `/api/intel/*` returns 503,
+because there is no graph there.
 
 `requirements.txt` at the root is generated from `backend/uv.lock`
 (`make export-reqs`), and CI fails if the two drift apart.

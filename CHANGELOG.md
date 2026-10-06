@@ -1,6 +1,63 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] Phase 1: Threat-intel layer, 2026-10-06
+
+### Added
+- **Feed adapters** behind one `FeedAdapter` interface (`fetch`,
+  `normalize_to_stix`): CISA KEV, NVD CVE 2.0 (incremental, paginated,
+  optional API key), MITRE ATT&CK enterprise + ICS, abuse.ch URLhaus /
+  ThreatFox / Feodo, and a dark-web interface with a generic env-configured
+  REST provider. `MockAdapter` replays `/fixtures` through the real parsers.
+- **HTTP layer:** token-bucket rate limiter, retry with exponential backoff,
+  full jitter and `Retry-After`, ETag/Last-Modified disk cache, streamed
+  response size caps, no redirects (auth headers can't leak).
+- **STIX 2.1:** deterministic UUIDv5 IDs (KEV and NVD merge into one CVE node),
+  escaped and grammar-validated patterns, and every object validated with
+  `stix2.parse`. Invalid items are rejected and counted, not fatal.
+- **Graph:** `GraphStore` contract with Neo4j and in-memory implementations that
+  share the projection and query logic. Constraints and indexes; provenance
+  (sources, first/last seen, max confidence); indicator TTL aging (stale, then
+  purge); `related_threats`, `cves_for_cpe` (NVD range semantics),
+  `techniques_for_behavior` / `link_rule`.
+- **NLP:** sanitizer (NFKC, invisible/bidi/ANSI stripping) plus regex extractors
+  (CVE, IPv4/6, IANA-validated domains, hashes, defang-aware) and spaCy
+  EntityRuler (ATT&CK IDs, malware/actor names seeded from the graph). Each
+  entity carries confidence and source span.
+- **Scheduling:** persistent APScheduler jobs per feed plus hourly aging;
+  `feed_runs` history; `GET /api/feeds/status`.
+- Read-only intel API (`/api/intel/*`), CLI (`python -m app.cli`),
+  `make demo-phase1`, `make docker-test`, `make docker-demo-phase1`.
+- Fixtures built from real public data by `scripts/build_fixtures.py`, plus
+  synthetic URLhaus/ThreatFox/dark-web samples (reserved IPs and domains only).
+- `lab` optional-dependency extra. The hosted (Vercel) app imports none of it,
+  which a CI test enforces.
+
+### Fixed / hardened (found during this phase)
+- spaCy's tokenizer is roughly quadratic on long whitespace-free runs (20k `:`
+  took 49 s). Long runs are now masked before tokenization, and an adversarial
+  test guards it.
+- Sanitizer turned `\r\n` into `" \n"`; CRLF is now normalized first.
+- `related_threats` returned duplicates across indicators and same-name nodes,
+  and gave far paths the same score as direct ones. Results are now one per
+  threat, and confidence decays ×0.85 per extra hop.
+- CLI logs go to stderr so JSON on stdout stays parseable.
+
+### Verification
+- 236 tests on Linux (Docker, spaCy, Neo4j 5.26) at 97% coverage. Locally on
+  Windows, spaCy- and Neo4j-dependent tests skip (Smart App Control blocks
+  spaCy's DLLs).
+- Live formats verified 2026-10-02/06: KEV, NVD (record shape and
+  `lastMod*` date format), ATT&CK bundles, Feodo. URLhaus and ThreatFox return
+  401 without `Auth-Key`, so their response shapes are **unverified**.
+
+### Known limitations
+- Same-name entities from different sources stay separate nodes; queries
+  deduplicate by name. NVD AND-configurations are flattened. Version comparison
+  is heuristic. The in-memory graph is per process. No migrations yet
+  (`create_all`). APScheduler's job store pickles jobs, so the DB must be
+  app-trusted (threat model F8). Details in `docs/architecture.md`.
+
+## [Unreleased: Vercel]
 
 ### Added
 - Vercel deployment: `vercel.json` (static frontend, FastAPI function at

@@ -93,6 +93,32 @@ def test_darkweb_url_must_be_https(make_settings: SettingsFactory) -> None:
         make_settings(darkweb_api_url="http://intel.example", darkweb_api_key="k" * 10)
 
 
+def test_env_example_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The documented .env.example must load (inline comments, JSON field map)."""
+    from app.core.config import REPO_ROOT
+
+    monkeypatch.setenv("DSN_DEVICE_ID_HMAC_KEY", TEST_HMAC_KEY)
+    s = Settings(_env_file=REPO_ROOT / ".env.example")
+    assert s.env == "development"
+    assert s.dry_run is True
+    assert s.offline_mode is True
+    assert s.nvd_api_key is None
+    assert s.darkweb_auth_scheme == "Bearer"
+    assert s.darkweb_field_map["published"] == "published_at"
+    assert s.cors_origins == ["http://localhost:5173"]
+
+
+def test_env_example_has_no_inline_comments() -> None:
+    """docker compose would take `KEY=  # text` literally (e.g. as an API key)."""
+    from app.core.config import REPO_ROOT
+
+    lines = (REPO_ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    offenders = [
+        line for line in lines if "=" in line and not line.startswith("#") and " #" in line
+    ]
+    assert offenders == []
+
+
 def test_secret_values_collects_all_secrets(make_settings: SettingsFactory) -> None:
     s = make_settings(
         neo4j_uri="bolt://neo4j:7687", neo4j_password="neo-pass", nvd_api_key="nvd-key"

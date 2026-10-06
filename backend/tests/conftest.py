@@ -1,18 +1,39 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import Settings, get_settings
+from app.core.config import REPO_ROOT, Settings, get_settings
 from app.main import create_app
 
 TEST_HMAC_KEY = "test-hmac-key-that-is-definitely-32-bytes-long"
+FIXTURES = REPO_ROOT / "fixtures"
 
 SettingsFactory = Callable[..., Settings]
+
+
+def _spacy_loads() -> bool:
+    # spaCy ships compiled extensions; some hosts (e.g. Windows Smart App Control)
+    # block them. Tests that need it skip there and run in CI / Docker.
+    if importlib.util.find_spec("spacy") is None:
+        return False
+    try:
+        import spacy
+
+        spacy.blank("en")
+    except ImportError:
+        return False
+    return True
+
+
+SPACY = _spacy_loads()
+requires_spacy = pytest.mark.skipif(not SPACY, reason="spaCy cannot load on this host")
 
 
 @pytest.fixture(autouse=True)
@@ -27,12 +48,16 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture
-def make_settings() -> SettingsFactory:
+def make_settings(tmp_path: Path) -> SettingsFactory:
     def _make(**overrides: Any) -> Settings:
         values: dict[str, Any] = {
             "env": "test",
             "device_id_hmac_key": TEST_HMAC_KEY,
             "log_json": True,
+            "database_url": f"sqlite:///{(tmp_path / 'dsn.sqlite3').as_posix()}",
+            "cache_dir": tmp_path / "cache",
+            "scheduler_enabled": False,
+            "offline_mode": True,
         }
         values.update(overrides)
         return Settings(_env_file=None, **values)

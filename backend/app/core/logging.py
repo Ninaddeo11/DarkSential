@@ -16,7 +16,7 @@ import re
 import sys
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TextIO
 
 REDACTED = "***"
 _SECRET_KEY = re.compile(r"(pass(word)?|secret|token|api[_-]?key|auth|credential|hmac)", re.I)
@@ -98,11 +98,15 @@ class PlainFormatter(logging.Formatter):
 
 
 def configure_logging(
-    level: str = "INFO", *, json_output: bool = True, secret_values: Iterable[str] = ()
+    level: str = "INFO",
+    *,
+    json_output: bool = True,
+    secret_values: Iterable[str] = (),
+    stream: TextIO | None = None,
 ) -> None:
     """Install a single redacting handler on the root logger (idempotent)."""
     redactor = Redactor(secret_values)
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter(redactor) if json_output else PlainFormatter(redactor))
 
     root = logging.getLogger()

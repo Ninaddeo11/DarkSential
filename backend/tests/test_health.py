@@ -46,24 +46,20 @@ def test_readiness_reports_unconfigured_dependencies(client: TestClient) -> None
     body = resp.json()
     assert body["status"] == "ready"
     assert body["checks"]["config"]["status"] == "ok"
-    assert body["checks"]["config"]["detail"] == "enforcement=dry-run"
-    for name in ("database", "neo4j", "mqtt"):
-        assert body["checks"][name]["status"] == "not_configured"
+    assert body["checks"]["config"]["detail"] == "enforcement=dry-run, deployment=lab"
+    assert body["checks"]["database"]["status"] == "ok"
+    # No Neo4j configured: in-memory graph works but is flagged as degraded.
+    assert body["checks"]["graph"]["status"] == "degraded"
+    assert body["checks"]["mqtt"]["status"] == "not_configured"
 
 
 def test_readiness_flags_enforcing_mode(make_settings: SettingsFactory) -> None:
     settings = make_settings(
-        dry_run=False,
-        neo4j_uri="bolt://neo4j:7687",
-        neo4j_password="pw-123456",
-        mqtt_host="broker",
-        mqtt_username="u",
-        mqtt_password="p",
+        dry_run=False, mqtt_host="broker", mqtt_username="u", mqtt_password="p"
     )
     with TestClient(create_app(settings)) as c:
         checks = c.get("/api/health/ready").json()["checks"]
-    assert checks["config"]["detail"] == "enforcement=ENFORCING"
-    assert "Phase 1" in checks["neo4j"]["detail"]
+    assert checks["config"]["detail"] == "enforcement=ENFORCING, deployment=lab"
     assert "Phase 4" in checks["mqtt"]["detail"]
 
 

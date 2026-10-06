@@ -22,8 +22,8 @@ services:
       NEO4J_AUTH: ${NEO4J_AUTH:?set NEO4J_AUTH in .env}
       NEO4J_server_memory_heap_max__size: 1G
     ports:
-      - "127.0.0.1:7474:7474"
-      - "127.0.0.1:7687:7687"
+      - "127.0.0.1:${DSN_NEO4J_HTTP_HOST_PORT:-7474}:7474"
+      - "127.0.0.1:${DSN_NEO4J_BOLT_HOST_PORT:-7687}:7687"
     volumes:
       - neo4j-data:/data
     networks: [backplane]
@@ -40,8 +40,12 @@ services:
     environment:
       DSN_API_HOST: 0.0.0.0
       DSN_DATABASE_URL: sqlite:////srv/data/dsn.sqlite3
+      DSN_FEEDS_CONFIG_PATH: /srv/config/feeds.yaml
+      DSN_FIXTURES_DIR: /srv/fixtures
+      DSN_CACHE_DIR: /srv/data/cache
+      DSN_NEO4J_URI: bolt://neo4j:7687
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${DSN_BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - backend-data:/srv/data
       - ../fixtures:/srv/fixtures:ro
@@ -60,7 +64,7 @@ services:
     build: ../frontend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5173:8080"
+      - "127.0.0.1:${DSN_FRONTEND_HOST_PORT:-5173}:8080"
     networks: [backplane]
     depends_on:
       backend:

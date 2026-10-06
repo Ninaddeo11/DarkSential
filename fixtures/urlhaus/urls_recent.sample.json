@@ -1,0 +1,45 @@
+{
+  "_comment": "SYNTHETIC. Shape follows the URLhaus API v1 /urls/recent/ docs; not verified against a live response (requires Auth-Key). Hosts use RFC 5737 / RFC 2606 reserved ranges.",
+  "query_status": "ok",
+  "urls": [
+    {
+      "id": "3000001",
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3000001/",
+      "url": "http://192.0.2.45:8080/bins/mirai.arm7",
+      "url_status": "online",
+      "host": "192.0.2.45",
+      "date_added": "2026-09-30 14:02:11 UTC",
+      "threat": "malware_download",
+      "blacklists": {"spamhaus_dbl": "not listed", "surbl": "not listed"},
+      "reporter": "synthetic",
+      "larted": "true",
+      "tags": ["elf", "mirai", "arm"]
+    },
+    {
+      "id": "3000002",
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3000002/",
+      "url": "https://update-cdn.example.net/fw/upgrade.sh",
+      "url_status": "offline",
+      "host": "update-cdn.example.net",
+      "date_added": "2026-09-29 08:15:00 UTC",
+      "threat": "malware_download",
+      "blacklists": {"spamhaus_dbl": "not listed", "surbl": "not listed"},
+      "reporter": "synthetic",
+      "larted": "false",
+      "tags": null
+    },
+    {
+      "id": "3000003",
+      "urlhaus_reference": "https://urlhaus.abuse.ch/url/3000003/",
+      "url": "http://198.51.100.7/x.sh?a=1&b='quoted'",
+      "url_status": "online",
+      "host": "198.51.100.7",
+      "date_added": "2026-09-30 22:40:59 UTC",
+      "threat": "malware_download",
+      "blacklists": {},
+      "reporter": "synthetic",
+      "larted": "true",
+      "tags": ["shellscript"]
+    }
+  ]
+}

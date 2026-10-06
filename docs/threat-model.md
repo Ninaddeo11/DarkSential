@@ -45,12 +45,14 @@ with mitigations. Status: ✅ in place · ⏳ planned (phase).
 
 | ID | Abuse case | Mitigations |
 |---|---|---|
-| F1 | **Intel poisoning:** a feed (or a spoofed dark-web mention) lists the gateway IP or a benign CDN as an IOC so DSN quarantines it. | Protected-host allowlist checked at the response layer, independent of scoring (⏳P4; config ✅). Per-source confidence and provenance on every graph node (⏳P1). Decisions show their evidence path (⏳P3). Single low-confidence source cannot alone exceed HIGH (⏳P3). |
-| F2 | **Injection via ingested text:** Cypher, HTML/JS or log injection through descriptions or forum posts. | Text is never executed. Cypher is parameterized only (⏳P1). Sanitize before display, and React escapes by default (⏳P6). Control characters escaped in plain logs and JSON-encoded in JSON logs ✅. |
-| F3 | **Parser/resource exhaustion:** huge or deeply nested payloads, regex DoS in NLP. | Response size limits, timeouts and streaming parse (⏳P1). Linear-time regex patterns with tests on adversarial fixtures (⏳P1). |
-| F4 | **Feed MITM / downgrade.** | HTTPS only, cert verification on. Dark-web provider URL must be `https` ✅. |
-| F5 | **API key leakage** through logs, errors or repr. | `SecretStr` everywhere ✅. Log redactor masks secret keys and values ✅. Health errors expose only the exception type ✅. `.env` git-ignored ✅. |
-| F6 | **Rate-limit abuse / ban** from upstream providers. | Per-adapter rate limiter, backoff with jitter, caching (⏳P1). Offline mode by default ✅. |
+| F1 | **Intel poisoning:** a feed (or a spoofed dark-web mention) lists the gateway IP or a benign CDN as an IOC so DSN quarantines it. | Protected-host allowlist checked at the response layer, independent of scoring (⏳P4; config ✅). Per-source confidence and provenance (`sources`, `first_seen`, `last_seen`, `confidence`) on every node and edge ✅. Dark-web base confidence 40, multiplied by entity confidence ✅. Co-mentions never become `indicates`/`attributed-to` edges ✅. Path confidence decays per hop ✅. Decisions show their evidence path (⏳P3). A single low-confidence source cannot alone exceed HIGH (⏳P3). |
+| F2 | **Injection via ingested text:** Cypher, STIX pattern, HTML/JS or log injection through descriptions or forum posts. | Text is never executed ✅. Cypher values are always parameters; labels and rel types are whitelisted by regex ✅ (tested with hostile IOCs). STIX pattern literals are escaped and grammar-validated ✅. Text is NFKC-normalized, invisible/bidi/ANSI characters stripped, length-capped ✅. HTML is stored as inert text; React escapes at display (⏳P6). Control characters are escaped in logs ✅. |
+| F3 | **Parser/resource exhaustion:** huge or deeply nested payloads, regex DoS in NLP. | Streamed responses with per-feed byte caps (declared and actual) and timeouts ✅. Linear-time regexes, tested on 80k-character adversarial inputs ✅. spaCy's quadratic tokenizer is guarded by masking long runs ✅ (found by the test suite). `/api/intel/extract` capped at 20k characters ✅. |
+| F4 | **Feed MITM / downgrade / redirect.** | HTTPS endpoints with cert verification ✅. Dark-web provider URL must be `https` ✅. Redirects are **not followed**, so `Auth-Key`/`apiKey` headers can't be replayed to another host ✅. |
+| F5 | **API key leakage** through logs, errors or repr. | `SecretStr` everywhere ✅. Log redactor masks secret keys and values ✅. Feed run errors are redacted before storage ✅. HTTP errors drop query strings ✅. Health errors expose only the exception type ✅. `.env` git-ignored ✅. |
+| F6 | **Rate-limit abuse / ban** from upstream providers. | Per-feed token bucket (NVD: 5/35 s without a key, 45/30 s with one), exponential backoff with full jitter, honors `Retry-After`, ETag/TTL cache ✅. Offline mode by default ✅. |
+| F7 | **Malicious fixture/config path** makes the mock adapter read arbitrary files. | Fixture paths must resolve inside `fixtures_dir` ✅ (tested with `../`). ATT&CK domains are allow-listed ✅. |
+| F8 | **Schedule tampering** through the persistent job store. | APScheduler 3's SQL job store **pickles** job state, so write access to the DB means code execution in the app. Jobs hold only an importable function reference and a feed name, and are re-synced from `feeds.yaml` at startup ✅. The DB must be treated as app-trusted: it lives in a non-root container volume, and with Postgres (Phase 2) it gets its own credentials. Residual risk, accepted. |
 
 ### Lab / device layer (TB4)
 
@@ -73,6 +75,7 @@ with mitigations. Status: ✅ in place · ⏳ planned (phase).
 | O4 | **Header injection** via `X-Request-ID`. | Accepted only if it parses as a UUID, otherwise regenerated ✅ (tested). |
 | O5 | **Recon** via OpenAPI or docs in production. | Disabled when `env=production` ✅. |
 | O6 | **Brute force / DoS on the API.** | Rate limits (⏳P6). |
+| O8 | **Expensive unauthenticated intel endpoints** (`/api/intel/*`, NLP extract). | Read-only, lab-only (503 in hosted mode) ✅. Input caps: IOC 2 KB, CPE 512 B, text 20k, `max_hops` ≤ 4 ✅. Rate limits and auth (⏳P6). |
 | O7 | **Hosted (Vercel) API is internet-facing**, not localhost-bound. | Hosted mode is forced by the entrypoint and dry-run only ✅ (tested). `env=production` defaults there, so OpenAPI is off ✅. HSTS/CSP via `vercel.json` ✅. Phase 0 exposes only health data (version, mode). **No mutating endpoint may be routed in hosted mode until auth lands (⏳P6).** |
 
 ### Enforcement layer (TB5)

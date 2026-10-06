@@ -22,6 +22,19 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      neo4j:
+        image: neo4j:5.26.31-community
+        env:
+          NEO4J_AUTH: neo4j/ci-throwaway-password
+        ports: ["7687:7687"]
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p ci-throwaway-password 'RETURN 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      DSN_TEST_NEO4J_URI: bolt://localhost:7687
+      DSN_TEST_NEO4J_USER: neo4j
+      DSN_TEST_NEO4J_PASSWORD: ci-throwaway-password
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0  # publishes full version tags only
@@ -29,7 +42,7 @@ jobs:
           version: "0.12.17"
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --frozen
+      - run: uv sync --frozen --all-extras
       - name: ruff
         run: |
           uv run ruff check . ../api
@@ -76,6 +89,7 @@ jobs:
         with:
           version: "0.12.17"
           python-version: "3.13"
-      - run: uv sync --frozen
+      - run: uv sync --frozen --all-extras
         working-directory: backend
       - run: make demo-phase0
+      - run: make demo-phase1

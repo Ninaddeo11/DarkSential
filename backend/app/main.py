@@ -15,11 +15,12 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api import health
+from app.api import feeds, health, intel
 from app.core.config import Settings, get_settings
-from app.core.health import HealthRegistry
+from app.core.health import CheckResult, HealthRegistry
 from app.core.identifiers import DeviceIdHasher
 from app.core.logging import configure_logging
+from app.feeds.config import load_feeds_config
 
 log = logging.getLogger(__name__)
 
@@ -31,16 +32,29 @@ _SECURITY_HEADERS = {
 }
 
 
-def _register_health_checks(registry: HealthRegistry, settings: Settings) -> None:
+def _register_health_checks(app: FastAPI, settings: Settings) -> None:
+    registry: HealthRegistry = app.state.health
     mode = "dry-run" if settings.dry_run else "ENFORCING"
-    registry.register_static("config", "ok", f"enforcement={mode}")
-    # Real probes replace these as each subsystem lands.
-    registry.register_static("database", "not_configured", "storage layer arrives in Phase 2")
     registry.register_static(
-        "neo4j",
-        "not_configured",
-        "graph client arrives in Phase 1" if settings.neo4j_uri else "DSN_NEO4J_URI unset",
+        "config", "ok", f"enforcement={mode}, deployment={settings.deployment}"
     )
+
+    async def database() -> CheckResult:
+        runtime = getattr(app.state, "runtime", None)
+        if runtime is None:
+            return CheckResult(status="not_configured", detail="no database in hosted mode")
+        result: CheckResult = await runtime.check_database()
+        return result
+
+    async def graph() -> CheckResult:
+        runtime = getattr(app.state, "runtime", None)
+        if runtime is None:
+            return CheckResult(status="not_configured", detail="no graph in hosted mode")
+        result: CheckResult = await runtime.check_graph()
+        return result
+
+    registry.register("database", database)
+    registry.register("graph", graph)
     registry.register_static(
         "mqtt",
         "not_configured",
@@ -68,8 +82,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if not settings.dry_run:
             log.warning("DRY_RUN is disabled: enforcing actions will modify the lab network")
-        yield
-        log.info("shutdown")
+        runtime = None
+        if settings.deployment == "lab":
+            from app.runtime import LabRuntime  # lab extra, imported lazily
+
+            runtime = LabRuntime.build(settings, app.state.feeds)
+            runtime.start()
+            app.state.runtime = runtime
+        try:
+            yield
+        finally:
+            if runtime is not None:
+                runtime.stop()
+                app.state.runtime = None
+            log.info("shutdown")
 
     is_prod = settings.env == "production"
     app = FastAPI(
@@ -84,8 +110,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.device_ids = DeviceIdHasher(
         settings.device_id_hmac_key.get_secret_value().encode("utf-8")
     )
+    app.state.feeds = load_feeds_config(settings.feeds_config_path)
+    app.state.runtime = None
     app.state.health = HealthRegistry()
-    _register_health_checks(app.state.health, settings)
+    _register_health_checks(app, settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -111,4 +139,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     app.include_router(health.router)
+    app.include_router(feeds.router)
+    app.include_router(intel.router)
     return app

@@ -17,6 +17,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = REPO_ROOT / "backend"
 MIN_HMAC_KEY_BYTES = 32
 
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -78,10 +79,28 @@ class Settings(BaseSettings):
     mqtt_password: SecretStr | None = None
 
     # --- Feeds -----------------------------------------------------------------
+    feeds_config_path: Path = BACKEND_ROOT / "config" / "feeds.yaml"
+    fixtures_dir: Path = REPO_ROOT / "fixtures"
+    cache_dir: Path = Path("./data/cache")
+    scheduler_enabled: bool = True
+    http_user_agent: str = "DarknetSentinelNexus/0.1 (defensive threat-intel client)"
     nvd_api_key: SecretStr | None = None
     abusech_auth_key: SecretStr | None = None
+    # Generic licensed dark-web intel provider (REST/JSON).
     darkweb_api_url: str | None = None
     darkweb_api_key: SecretStr | None = None
+    darkweb_auth_header: str = "Authorization"
+    darkweb_auth_scheme: str = "Bearer"  # empty string sends the bare key
+    darkweb_items_path: str = "data"  # dot path to the list of mentions
+    # Our field -> provider field (dot paths). JSON object in env.
+    darkweb_field_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "id": "id",
+            "source": "source",
+            "published": "published_at",
+            "text": "text",
+        }
+    )
 
     # --- Validators ------------------------------------------------------------
     @field_validator("cors_origins", "protected_hosts", mode="before")
@@ -121,6 +140,14 @@ class Settings(BaseSettings):
         if url is not None and urlparse(url).scheme != "https":
             raise ValueError("darkweb_api_url must use https")
         return url
+
+    @field_validator("darkweb_field_map")
+    @classmethod
+    def _field_map_complete(cls, mapping: dict[str, str]) -> dict[str, str]:
+        missing = {"id", "text"} - mapping.keys()
+        if missing:
+            raise ValueError(f"darkweb_field_map must map {sorted(missing)}")
+        return mapping
 
     @model_validator(mode="after")
     def _paired_credentials(self) -> Settings:

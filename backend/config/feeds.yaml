@@ -1,0 +1,76 @@
+# Threat-intel feed schedule and limits. Validated by app/feeds/config.py.
+#
+# interval_minutes   how often the scheduler runs the feed
+# ttl_days           indicators not re-seen within this window are marked stale,
+#                    and purged after 2x (vulnerabilities / ATT&CK never age out)
+# rate_limit         client-side token bucket: `requests` per `per_seconds`
+# cache_ttl_seconds  reuse a cached HTTP response younger than this
+# confidence         base STIX confidence (0-100) for objects from this feed
+# fixture            file under /fixtures replayed by the MockAdapter
+# requires           settings field that must be set for live mode
+
+defaults:
+  ttl_days: 30
+  cache_ttl_seconds: 900
+  timeout_seconds: 30
+  max_response_mb: 20
+  rate_limit: {requests: 1, per_seconds: 2}
+
+feeds:
+  cisa_kev:
+    interval_minutes: 360
+    confidence: 95
+    cache_ttl_seconds: 3600
+    fixture: kev/kev.sample.json
+
+  nvd_cve:
+    interval_minutes: 120
+    confidence: 85
+    # NVD: 5 requests / 30 s without an API key (50 with one). We stay under it.
+    rate_limit: {requests: 5, per_seconds: 35}
+    rate_limit_with_key: {requests: 45, per_seconds: 30}
+    options:
+      lookback_days: 2         # NVD caps lastMod ranges at 120 days
+      results_per_page: 2000   # NVD maximum
+      max_pages: 20
+    fixture: nvd/nvd.sample.json
+
+  mitre_attack:
+    interval_minutes: 1440
+    confidence: 90
+    cache_ttl_seconds: 43200
+    max_response_mb: 120       # enterprise-attack.json is ~55 MB
+    timeout_seconds: 120
+    options:
+      domains: [enterprise-attack, ics-attack]
+    fixture: attack/attack.sample.json
+
+  urlhaus:
+    interval_minutes: 60
+    confidence: 70
+    ttl_days: 14
+    requires: abusech_auth_key
+    fixture: urlhaus/urls_recent.sample.json
+
+  threatfox:
+    interval_minutes: 60
+    confidence: 70
+    ttl_days: 14
+    requires: abusech_auth_key
+    options:
+      days: 1
+    fixture: threatfox/get_iocs.sample.json
+
+  feodo:
+    interval_minutes: 60
+    confidence: 80
+    ttl_days: 14
+    fixture: feodo/ipblocklist.sample.json
+
+  darkweb:
+    interval_minutes: 60
+    # Unverified, adversary-authored text: low base confidence by design.
+    confidence: 40
+    ttl_days: 30
+    requires: darkweb_api_url
+    fixture: darkweb/mentions.sample.json
