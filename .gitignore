@@ -5,6 +5,8 @@
 infra/mosquitto/certs/*
 !infra/mosquitto/certs/.gitkeep
 infra/mosquitto/passwd
+infra/mosquitto/credentials.json
+firmware/esp32-node/provisioning/
 
 # Python
 __pycache__/

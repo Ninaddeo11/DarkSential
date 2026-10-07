@@ -1,0 +1,22 @@
+# Mosquitto topic ACLs. Default deny: anything not granted here is refused.
+# Denied publishes are dropped (and logged); denied subscriptions get no messages.
+# $SYS/# is not readable by anyone.
+
+# Backend: sends status-node commands, consumes telemetry, acks and device topics.
+user dsn-backend
+topic write dsn/cmd/#
+topic read dsn/telemetry/#
+topic read dsn/ack/#
+topic read home/#
+
+# ESP32 status node: its command topic only; writes acks.
+user status-node
+topic read dsn/cmd/status-node
+topic write dsn/ack/status-node
+
+# Every authenticated client, %u = its own username: it may publish telemetry and
+# device data ONLY under its own name, and read its own config. A device can
+# never write another device's topics, any command topic, or read others' data.
+pattern write dsn/telemetry/%u
+pattern write home/%u/#
+pattern read dsn/config/%u

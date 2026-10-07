@@ -142,9 +142,15 @@ class Settings(BaseSettings):
     mqtt_tls: bool = True
     mqtt_ca_file: str | None = None
     mqtt_command_key: SecretStr | None = None
+    # Mosquitto log file to tail (connect/auth/subscribe/denied events). Optional.
+    mqtt_broker_log: Path | None = None
+    # MQTT usernames of DSN's own services, excluded from device behavior.
+    mqtt_service_clients: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["dsn-backend"]
+    )
 
     # --- Validators ------------------------------------------------------------
-    @field_validator("cors_origins", "protected_hosts", mode="before")
+    @field_validator("cors_origins", "protected_hosts", "mqtt_service_clients", mode="before")
     @classmethod
     def _csv(cls, value: object) -> object:
         return _split_csv(value)

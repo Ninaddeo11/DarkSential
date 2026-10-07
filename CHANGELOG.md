@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.6.0] Phase 5: IoT layer (Mosquitto + ESP32), 2026-10-08
+
+### Added
+- **Mosquitto hardening:**
+  - TLS-only listener on 8883 with a lab CA (EC P-256)
+  - `$7$` PBKDF2-SHA512 per-client passwords; no anonymous access
+  - deny-by-default topic ACLs using `%u` patterns
+  - connection, packet and queue caps
+  - an entrypoint that installs the secrets as `mosquitto:0600`
+  - `broker-ratelimit.nft`, a new-connection rate meter
+- `scripts/mqtt_provision.py`. It generates:
+  - the CA and server certificate
+  - the `passwd` file
+  - `credentials.json` (the users and the command key)
+  - a serial provisioning file per ESP32
+
+  `make setup` runs it and writes the backend's MQTT password and command key into `.env`.
+- Backend `TelemetryConsumer`: validated telemetry goes to the device registry, and becomes traffic events when there is no broker log.
+- Backend `BrokerLogParser` / `BrokerLogTailer`: CONNECT, authentication failures, SUBSCRIBE and denied PUBLISH become behavior events. Service clients are ignored.
+- **ESP32 firmware** (`firmware/esp32-node`, PlatformIO):
+  - MQTT over TLS
+  - RGB LED states (BOOT, PROVISION, OFFLINE, NORMAL, ALERT, QUARANTINED)
+  - telemetry every 10 s
+  - HMAC command verification with staleness and replay checks, plus acks
+  - reconnect with jittered backoff
+  - NVS-backed serial provisioning
+  - an optional read-only BLE GATT service
+
+  18 host unit tests cover the portable core.
+- Tasks:
+  - `demo-phase5`
+  - `docker-test-mqtt` (a real TLS broker)
+  - `firmware-test` (native tests and both device builds, in Docker)
+- CI jobs `iot` (a real Mosquitto) and `firmware` (`pio test -e native` and both builds). The demo job runs `demo-phase5`.
+
+### Fixed / found during this phase
+- The broker logged permission warnings for world-readable `passwd`/`acl` files on bind mounts. The entrypoint now copies them with the correct ownership and mode.
+- The backend's own wildcard subscription and command publishes tripped the `mqtt_wildcard_subscription` and `mqtt_restricted_publish` rules. Service clients are now excluded from the broker-log parser.
+- The BLE firmware build exceeded the default 1.25 MB app partition. The `esp32dev_ble` env now uses `huge_app.csv`.
+
+### Known limitations
+- The firmware is compiled and its logic is host-tested, but it has not been run on physical hardware here.
+- Devices authenticate with passwords, not mutual TLS.
+- The replay cache does not survive a reboot.
+- Behind NAT, the broker log attributes all clients to the NAT address.
+- Mosquitto has no per-client message-rate limit, so message floods are detected rather than throttled.
+
+### Unverified assumptions
+- The broker log line formats were captured from mosquitto 2.0.22 only. Other versions may differ; the parser skips lines it does not recognise.
+
 ## [0.5.0] Phase 4: Response (quarantine & recovery), 2026-10-07
 
 ### Added

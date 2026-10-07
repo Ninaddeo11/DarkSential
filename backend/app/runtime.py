@@ -7,6 +7,7 @@ Imported lazily by ``app.main`` only when ``deployment == "lab"``, so hosted
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -35,6 +36,7 @@ from app.feeds.status import FeedStatusResponse
 from app.graph.memory import InMemoryGraphStore
 from app.graph.store import GraphStore
 from app.mqtt.commands import NullPublisher, PahoPublisher, Publisher, StatusNodeCommander
+from app.mqtt.telemetry import TELEMETRY_TOPIC, TelemetryConsumer
 from app.response.audit import AuditLog
 from app.response.drivers import DriverError, DryRunDriver, ResponseDriver, build_driver
 from app.response.service import ResponseService
@@ -61,7 +63,11 @@ def _build_driver(settings: Settings) -> tuple[ResponseDriver, str | None]:
         return DryRunDriver(), f"{settings.response_driver} unavailable ({exc}); using dry-run"
 
 
-def _build_publisher(settings: Settings, on_ack: Callable[[bytes], None]) -> Publisher:
+def _build_publisher(
+    settings: Settings,
+    on_ack: Callable[[bytes], None],
+    subscriptions: dict[str, Callable[[str, bytes], object]] | None = None,
+) -> Publisher:
     if not settings.mqtt_host or not settings.mqtt_username or not settings.mqtt_password:
         return NullPublisher()
     return PahoPublisher(
@@ -72,7 +78,15 @@ def _build_publisher(settings: Settings, on_ack: Callable[[bytes], None]) -> Pub
         tls=settings.mqtt_tls,
         ca_file=settings.mqtt_ca_file,
         on_ack=on_ack,
+        subscriptions=subscriptions,
     )
+
+
+def _broker_ip(settings: Settings) -> str | None:
+    try:
+        return ipaddress.ip_address(settings.mqtt_host or "").compressed
+    except ValueError:
+        return None
 
 
 def build_graph_store(settings: Settings) -> GraphStore:
@@ -153,6 +167,7 @@ class LabRuntime:
     audit: AuditLog
     publisher: Publisher
     response_error: str | None = None
+    telemetry: TelemetryConsumer | None = None
     _services: list[Any] = field(default_factory=list)
 
     @classmethod
@@ -191,7 +206,16 @@ class LabRuntime:
         audit = AuditLog(sessions)
         driver, response_error = _build_driver(settings)
         holder: dict[str, ResponseService] = {}
-        publisher = _build_publisher(settings, lambda raw: holder["svc"].on_ack(raw))
+        telemetry = TelemetryConsumer(
+            registry.observe,
+            None if settings.mqtt_broker_log else pipeline.ingest,
+            broker_ip=_broker_ip(settings),
+        )
+        publisher = _build_publisher(
+            settings,
+            lambda raw: holder["svc"].on_ack(raw),
+            {TELEMETRY_TOPIC: telemetry.handle},
+        )
         key = (
             settings.mqtt_command_key.get_secret_value().encode()
             if settings.mqtt_command_key
@@ -207,6 +231,7 @@ class LabRuntime:
             "trust_refresh": TRUST_REFRESH_SECONDS,
             "response_sweep": RESPONSE_SWEEP_SECONDS,
             "risk_rescore": RISK_RESCORE_SECONDS,
+            "pipeline_tick": behavior_cfg.window_seconds,
         }
         if caps["nmap"].active:
             named["nmap_discovery"] = settings.nmap_interval_minutes * 60
@@ -238,6 +263,7 @@ class LabRuntime:
                 f"recover:{qid}", "app.feeds.jobs:run_recovery_job", at, [qid]
             )
             response.cancel_recovery = lambda qid: sched.cancel(f"recover:{qid}")
+        rt.telemetry = telemetry
         return rt
 
     @property
@@ -258,6 +284,8 @@ class LabRuntime:
         jobs.register("nmap_discovery", self.run_nmap)
         jobs.register("response_sweep", self.response.expire_due)
         jobs.register("risk_rescore", self.rescore_all)
+        # Live traffic: close windows on wall-clock time even if a device goes quiet.
+        jobs.register("pipeline_tick", lambda: self.pipeline.tick(datetime.now(UTC)))
         jobs.set_recovery(
             lambda qid: self.response.release(
                 qid, actor="system:auto-recovery", reason="quarantine expired"
@@ -289,6 +317,18 @@ class LabRuntime:
         self.engine.dispose()
 
     def _start_discovery(self) -> None:
+        if self.settings.mqtt_broker_log:
+            from app.mqtt.brokerlog import BrokerLogParser, BrokerLogTailer
+
+            tailer = BrokerLogTailer(
+                self.settings.mqtt_broker_log,
+                BrokerLogParser(
+                    _broker_ip(self.settings), frozenset(self.settings.mqtt_service_clients)
+                ),
+                self.pipeline.ingest,
+            )
+            tailer.start()
+            self._services.append(tailer)
         caps = capabilities.report(self.settings)
         if caps["passive"].active:
             from app.detect.passive import PassiveObserver

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.intel.sanitize import sanitize_text
 
-ObservationSource = Literal["nmap", "arp", "dhcp", "mdns", "ble", "traffic", "manual"]
+ObservationSource = Literal["nmap", "arp", "dhcp", "mdns", "ble", "traffic", "manual", "telemetry"]
 
 
 def clean_label(value: str | None, limit: int = 128) -> str | None:

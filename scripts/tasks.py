@@ -44,17 +44,31 @@ def _require(tool: str) -> None:
 
 @task
 def setup() -> None:
-    """Install backend and frontend dependencies."""
+    """Install deps; create .env with generated secrets; provision MQTT TLS + creds."""
     _require("uv")
     run(["uv", "sync", "--frozen", "--all-extras"], cwd=BACKEND)
     run([NPM, "ci"], cwd=FRONTEND)
     env_file = ROOT / ".env"
     if not env_file.exists():
         text = (ROOT / ".env.example").read_text(encoding="utf-8")
-        text = text.replace("DSN_DEVICE_ID_HMAC_KEY=\n", f"DSN_DEVICE_ID_HMAC_KEY={secrets.token_urlsafe(48)}\n")
+        text = text.replace(
+            "DSN_DEVICE_ID_HMAC_KEY=\n", f"DSN_DEVICE_ID_HMAC_KEY={secrets.token_urlsafe(48)}\n"
+        )
         text = text.replace("change-me-to-a-long-random-password", secrets.token_urlsafe(24))
         env_file.write_text(text, encoding="utf-8")
         print("created .env with freshly generated secrets")
+    creds_file = ROOT / "infra" / "mosquitto" / "credentials.json"
+    run(["uv", "run", "python", "../scripts/mqtt_provision.py", "--host", "mosquitto",
+         "--host", "localhost"], cwd=BACKEND)
+    creds = json.loads(creds_file.read_text(encoding="utf-8"))
+    env = env_file.read_text(encoding="utf-8")
+    for key, value in (("DSN_MQTT_PASSWORD", creds["users"]["dsn-backend"]),
+                       ("DSN_MQTT_COMMAND_KEY", creds["command_key"])):
+        lines = [ln for ln in env.splitlines() if not ln.startswith(f"{key}=")]
+        lines.append(f"{key}={value}")
+        env = "\n".join(lines) + "\n"
+    env_file.write_text(env, encoding="utf-8")
+    print("MQTT provisioned: backend credentials + command key written to .env")
 
 
 @task
@@ -151,6 +165,14 @@ def demo_phase4() -> None:
 
 
 @task
+def demo_phase5() -> None:
+    """Offline IoT demo: telemetry validation, signed commands + acks, broker-log rules."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DSN_")}
+    env["DSN_DEVICE_ID_HMAC_KEY"] = secrets.token_urlsafe(48)
+    run(["uv", "run", "python", "-m", "app.cli", "demo-phase5"], cwd=BACKEND, env=env)
+
+
+@task
 def ablation() -> None:
     """Regenerate and execute docs/evaluation/ablation.ipynb (+ CSVs and plots)."""
     run(["uv", "run", "python", "../scripts/build_ablation_notebook.py"], cwd=BACKEND)
@@ -234,6 +256,69 @@ def docker_test_nft() -> None:
             "uv run pytest -q -p no:cacheprovider tests/test_response_drivers.py",
         ]
     )
+
+
+TEST_MOSQUITTO = "dsn-test-mosquitto"
+
+
+@task
+def docker_test_mqtt() -> None:
+    """Integration tests against a real TLS Mosquitto with provisioned creds + ACLs."""
+    _require("docker")
+    subprocess.run(["docker", "network", "create", TEST_NET], capture_output=True, check=False)
+    subprocess.run(["docker", "rm", "-f", TEST_MOSQUITTO], capture_output=True, check=False)
+    work = BACKEND / "data" / "mqtt-it"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "log").mkdir(parents=True)
+    _docker_backend(
+        "uv run python ../scripts/mqtt_provision.py --out data/mqtt-it --host mosquitto "
+        "--device esp32-node --device rogue-sensor --no-firmware"
+    )
+    mosq = ROOT / "infra" / "mosquitto"
+    run([
+        "docker", "run", "-d", "--name", TEST_MOSQUITTO, "--network", TEST_NET,
+        "--network-alias", "mosquitto",
+        "--entrypoint", "/bin/sh",
+        "-v", f"{mosq / 'config' / 'mosquitto.conf'}:/mosquitto/config/mosquitto.conf:ro",
+        "-v", f"{mosq / 'entrypoint.sh'}:/entrypoint.sh:ro",
+        "-v", f"{mosq / 'config' / 'acl'}:/mosquitto/src/acl:ro",
+        "-v", f"{work / 'passwd'}:/mosquitto/src/passwd:ro",
+        "-v", f"{work / 'certs'}:/mosquitto/src/certs:ro",
+        "-v", f"{work / 'log'}:/mosquitto/log",
+        "eclipse-mosquitto:2.0.22", "/entrypoint.sh",
+    ])
+    try:
+        time.sleep(2)
+        _docker_backend(
+            "uv run pytest -q -p no:cacheprovider -p no:randomly tests/test_mqtt_integration.py",
+            {
+                "DSN_TEST_MQTT_DIR": "/repo/backend/data/mqtt-it",
+                "DSN_TEST_MQTT_HOST": "mosquitto",
+                "DSN_TEST_MQTT_LOG": "/repo/backend/data/mqtt-it/log/mosquitto.log",
+            },
+        )
+    finally:
+        subprocess.run(["docker", "logs", "--tail", "5", TEST_MOSQUITTO], check=False)
+        subprocess.run(["docker", "rm", "-f", TEST_MOSQUITTO], capture_output=True, check=False)
+
+
+PIO_IMAGE = "python:3.12-bookworm"  # needs a host gcc for the native test env
+PIO_VERSION = "6.2.0"
+
+
+@task
+def firmware_test() -> None:
+    """ESP32 firmware: native unit tests + esp32dev / esp32dev_ble builds (PlatformIO)."""
+    _require("docker")
+    fw = ROOT / "firmware" / "esp32-node"
+    run([
+        "docker", "run", "--rm", "-v", f"{fw}:/src:ro", "-v", "dsn-pio-cache:/root/.platformio",
+        "-w", "/work", PIO_IMAGE, "sh", "-c",
+        # Build in a copy so no .pio/ output lands in the repo.
+        "cp -r /src/. /work && rm -rf /work/.pio && "
+        f"pip install -q --root-user-action=ignore platformio=={PIO_VERSION} && "
+        "pio test -e native && pio run -e esp32dev -e esp32dev_ble",
+    ])
 
 
 @task

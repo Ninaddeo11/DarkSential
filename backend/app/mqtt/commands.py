@@ -2,16 +2,20 @@
 
 Command topic: ``dsn/cmd/status-node``. Payload (JSON)::
 
-    {"id": "<uuid4>", "ts": "<iso8601>", "cmd": "QUARANTINE|ALERT|RECOVER|NORMAL",
-     "node_id": "dev-…", "level": "critical", "ttl": 60, "sig": "<hex HMAC-SHA256>"}
+    {"id": "<uuid4>", "ts": <unix seconds>, "cmd": "QUARANTINE|ALERT|RECOVER|NORMAL",
+     "node_id": "dev-…" | "", "level": "critical" | "", "ttl": 60, "sig": "<hex>"}
 
-``sig`` = HMAC-SHA256(command_key, canonical JSON of every other field). The
-firmware (Phase 5) verifies it and drops unsigned, stale (ts + ttl) or replayed
-(seen id) commands, so a client that can publish to the topic still can't drive
-the LEDs. Broker ACLs (Phase 5) are the first barrier.
+``sig`` = HMAC-SHA256(command_key, "id|ts|cmd|node_id|level|ttl"). The message is
+a pipe-joined string, not JSON: it's trivially and identically reproducible in
+the ESP32 firmware (re-serializing JSON byte-for-byte across languages is
+fragile). Every field is restricted to ``[A-Za-z0-9._:-]`` so no field can
+contain the separator. The firmware (``firmware/esp32-node``) drops unsigned,
+badly signed, stale (|now - ts| > ttl) or replayed (seen id) commands, so a
+client that gets past the broker ACLs still can't drive the LEDs.
 
-Ack topic: ``dsn/ack/status-node``, payload ``{"id": "<command id>", "status": "ok|…"}``.
-Acks are informational (audited). They never gate enforcement.
+Ack topic: ``dsn/ack/status-node``, payload ``{"id": "<command id>", "status": "ok|bad_sig|
+stale|replay|bad_cmd"}``. Acks are informational (audited). They never gate
+enforcement.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import threading
 import uuid
 from collections.abc import Callable
@@ -31,20 +36,31 @@ log = logging.getLogger(__name__)
 Command = Literal["QUARANTINE", "ALERT", "RECOVER", "NORMAL"]
 COMMAND_TOPIC = "dsn/cmd/status-node"
 ACK_TOPIC = "dsn/ack/status-node"
+SIGNED_FIELDS = ("id", "ts", "cmd", "node_id", "level", "ttl")
+_SAFE = re.compile(r"^[A-Za-z0-9._:-]*$")
 
 
-def canonical(payload: dict[str, Any]) -> bytes:
-    return json.dumps(
-        {k: v for k, v in payload.items() if k != "sig"}, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+def signing_string(payload: dict[str, Any]) -> bytes:
+    parts = []
+    for field in SIGNED_FIELDS:
+        value = payload.get(field)
+        text = "" if value is None else str(value)
+        if not _SAFE.fullmatch(text):
+            raise ValueError(f"unsigned-safe characters only in {field!r}")
+        parts.append(text)
+    return "|".join(parts).encode("ascii")
 
 
 def sign(payload: dict[str, Any], key: bytes) -> str:
-    return hmac.new(key, canonical(payload), hashlib.sha256).hexdigest()
+    return hmac.new(key, signing_string(payload), hashlib.sha256).hexdigest()
 
 
 def verify(payload: dict[str, Any], key: bytes) -> bool:
-    return hmac.compare_digest(str(payload.get("sig", "")), sign(payload, key))
+    try:
+        expected = sign(payload, key)
+    except ValueError:
+        return False
+    return hmac.compare_digest(str(payload.get("sig", "")), expected)
 
 
 class Publisher(Protocol):
@@ -86,10 +102,10 @@ class StatusNodeCommander:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "id": str(uuid.uuid4()),
-            "ts": self._clock().isoformat(),
+            "ts": int(self._clock().timestamp()),
             "cmd": cmd,
-            "node_id": node_id,
-            "level": level,
+            "node_id": node_id or "",
+            "level": level or "",
             "ttl": self._ttl,
         }
         if self._key:
@@ -121,7 +137,11 @@ class StatusNodeCommander:
 
 
 class PahoPublisher:
-    """paho-mqtt v2 client: TLS, credentials, background loop with reconnect backoff."""
+    """paho-mqtt v2 client: TLS, credentials, background loop with reconnect backoff.
+
+    Subscribes to the status-node ack topic plus any ``subscriptions``
+    (topic filter -> handler(topic, payload)), re-subscribing on every reconnect.
+    """
 
     def __init__(
         self,
@@ -133,6 +153,7 @@ class PahoPublisher:
         tls: bool,
         ca_file: str | None,
         on_ack: Callable[[bytes], None],
+        subscriptions: dict[str, Callable[[str, bytes], object]] | None = None,
     ) -> None:
         import paho.mqtt.client as mqtt
         from paho.mqtt.enums import CallbackAPIVersion
@@ -145,15 +166,27 @@ class PahoPublisher:
             self._client.tls_set(ca_certs=ca_file)  # verifies server cert + hostname
         self._client.reconnect_delay_set(min_delay=1, max_delay=60)
         self._on_ack = on_ack
+        self._subs = dict(subscriptions or {})
+        matches = mqtt.topic_matches_sub
 
         def on_connect(client: Any, userdata: Any, flags: Any, reason: Any, props: Any) -> None:
             if not getattr(reason, "is_failure", False):
                 client.subscribe(ACK_TOPIC, qos=1)
+                for topic_filter in self._subs:
+                    client.subscribe(topic_filter, qos=1)
             log.info("mqtt connected", extra={"reason": str(reason)})
 
         def on_message(client: Any, userdata: Any, msg: Any) -> None:
+            payload = bytes(msg.payload[:4096])
             if msg.topic == ACK_TOPIC:
-                self._on_ack(bytes(msg.payload[:4096]))
+                self._on_ack(payload)
+                return
+            for topic_filter, handler in self._subs.items():
+                if matches(topic_filter, msg.topic):
+                    try:
+                        handler(msg.topic, payload)
+                    except Exception:
+                        log.exception("mqtt handler failed", extra={"topic_filter": topic_filter})
 
         self._client.on_connect = on_connect
         self._client.on_message = on_message

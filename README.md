@@ -18,7 +18,7 @@ streams everything to a real-time 3D command center.
 | 2 | Device discovery and behavior baselines | ✅ done |
 | 3 | Explainable risk engine | ✅ done |
 | 4 | Quarantine and recovery | ✅ done |
-| 5 | Mosquitto TLS/ACL and ESP32 firmware | ⏳ |
+| 5 | Mosquitto TLS/ACL and ESP32 firmware | ✅ done |
 | 6 | Real-time API and 3D command center | ⏳ |
 | 7 | Simulation and evaluation | ⏳ |
 
@@ -34,6 +34,7 @@ make demo-phase1    # offline intel demo: 7 feeds -> STIX 2.1 -> graph -> querie
 make demo-phase2    # devices + behavior: nmap fixture, simulated traffic + attacks -> detections
 make demo-phase3    # explainable risk: scored decisions, contributions, evidence paths, SHAP
 make demo-phase4    # quarantine/recovery: refusal, auto-quarantine, reconcile, audit chain
+make demo-phase5    # IoT: telemetry validation, signed commands + acks, broker-log rules
 make ablation       # re-run the executed ablation notebook (docs/evaluation/)
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
 make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
@@ -169,7 +170,8 @@ cd backend
 uv run python -m app.cli quarantine dev-0123456789abcdef 30
 uv run python -m app.cli release dev-0123456789abcdef
 uv run python -m app.cli audit --verify
-curl -X POST localhost:8000/api/quarantines -H "Authorization: Bearer $DSN_ADMIN_TOKEN"      -H 'Content-Type: application/json' -d '{"node_id":"dev-…","reason":"manual","minutes":30}'
+curl -X POST localhost:8000/api/quarantines -H "Authorization: Bearer $DSN_ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"node_id":"dev-…","reason":"manual","minutes":30}'
 ```
 
 **Real enforcement** runs on the lab gateway only, after testing in dry-run:
@@ -177,6 +179,45 @@ set `DSN_DRY_RUN=false` and `DSN_PROTECTED_HOSTS`, then
 `docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.gateway.yml up -d`
 (host network, `NET_ADMIN`/`NET_RAW` only, nftables driver). Read the warnings
 in that file first.
+
+### IoT layer: broker and ESP32 (Phase 5)
+
+The Mosquitto broker (`infra/mosquitto/`) is set up as follows:
+
+- **Transport.** It accepts **TLS only**, on port 8883, using a lab CA with EC P-256 keys.
+- **Accounts.** Every client has its own password, stored as a PBKDF2-SHA512 hash. Anonymous access is off.
+- **Topic access.** ACLs are deny-by-default: a device can publish only to `dsn/telemetry/<its own user>`.
+- **Limits.** `mosquitto.conf` caps connection count, packet size, keepalive, and in-flight and queued messages. Mosquitto has no per-client message-rate limit, so message floods are detected (`mqtt_connect_flood`) rather than throttled. A host-level new-connection rate limit is in `broker-ratelimit.nft`.
+
+`make setup` provisions everything the broker and the backend need:
+
+- the CA and server certificate
+- the `passwd` file
+- the backend's MQTT password and command key, written into `.env`
+- one serial provisioning file per ESP32 (gitignored)
+
+To add devices, run `python scripts/mqtt_provision.py --device <name> --host <broker-ip>`.
+
+The backend:
+
+- **Consumes telemetry.** Payloads are validated (size, schema, charset) before they reach the device registry.
+- **Tails the broker log.** CONNECT, authentication failures, wildcard subscriptions and ACL-denied publishes become behavior events. This is how the `mqtt_wildcard_subscription` and `mqtt_restricted_publish` rules fire on real traffic.
+- **Signs the commands it sends** to the status node with HMAC.
+
+The [ESP32 firmware](firmware/esp32-node/README.md) does the following:
+
+- Shows NORMAL, ALERT and QUARANTINED on an RGB LED.
+- Publishes telemetry.
+- Verifies each command's signature, freshness and replay status before acting, then acks it.
+- Reconnects with jittered backoff.
+- Reads its credentials from NVS. They are entered over serial and never compiled in.
+
+That README covers wiring, flashing and provisioning.
+
+```bash
+make docker-test-mqtt   # integration tests against a real TLS Mosquitto (Docker)
+make firmware-test      # firmware unit tests on the host + esp32dev/esp32dev_ble builds (Docker)
+```
 
 ## Configuration
 

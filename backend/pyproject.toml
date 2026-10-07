@@ -47,6 +47,7 @@ ml = [
 
 [dependency-groups]
 dev = [
+    "cryptography==50.0.2",
     "httpx2==2.13.1",  # starlette's TestClient transport
     "hypothesis==6.168.3",
     "ipykernel==7.4.0",
@@ -124,6 +125,7 @@ filterwarnings = [
 markers = [
     "neo4j: needs a Neo4j server (DSN_TEST_NEO4J_URI)",
     "nft: needs real nftables + CAP_NET_ADMIN (DSN_TEST_NFT=1)",
+    "mqtt: needs a real Mosquitto broker (docker-test-mqtt)",
 ]
 
 [tool.coverage.run]

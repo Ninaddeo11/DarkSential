@@ -8,12 +8,27 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.0.22
     restart: unless-stopped
+    # Installs secrets with mosquitto-only permissions, then starts the broker.
+    # Fails closed (won't start) until `make setup` / scripts/mqtt_provision.py ran.
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/certs:/mosquitto/certs:ro
+      - ./mosquitto/entrypoint.sh:/entrypoint.sh:ro
+      - ./mosquitto/config/acl:/mosquitto/src/acl:ro
+      - ./mosquitto/passwd:/mosquitto/src/passwd:ro
+      - ./mosquitto/certs:/mosquitto/src/certs:ro
       - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    ports:
+      # TLS only. Bind to the lab-facing interface so ESP32 nodes can reach it
+      # (DSN_MQTT_BIND=192.168.50.2); localhost by default.
+      - "${DSN_MQTT_BIND:-127.0.0.1}:8883:8883"
     networks: [backplane]
-    # Not published in Phase 0. Phase 5 publishes 8883 (TLS) for the ESP32 node.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8883 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   neo4j:
     image: neo4j:5.26.31-community
@@ -44,6 +59,11 @@ services:
       DSN_CACHE_DIR: /srv/data/cache
       DSN_NEO4J_URI: bolt://neo4j:7687
       DSN_MODELS_DIR: /srv/data/models
+      DSN_MQTT_HOST: mosquitto
+      DSN_MQTT_PORT: 8883
+      DSN_MQTT_USERNAME: dsn-backend
+      DSN_MQTT_CA_FILE: /srv/mqtt-ca.crt
+      DSN_MQTT_BROKER_LOG: /srv/mosquitto-log/mosquitto.log
       # Discovery (nmap, raw capture) is NOT run in this container: it has no
       # capabilities and no nmap binary. A dedicated, minimally privileged
       # capture/enforcement container arrives in Phase 4.
@@ -52,12 +72,14 @@ services:
     volumes:
       - backend-data:/srv/data
       - ../fixtures:/srv/fixtures:ro
+      - ./mosquitto/certs/ca.crt:/srv/mqtt-ca.crt:ro
+      - mosquitto-log:/srv/mosquitto-log:ro
     networks: [backplane]
     depends_on:
       neo4j:
         condition: service_healthy
       mosquitto:
-        condition: service_started
+        condition: service_healthy
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -80,5 +102,6 @@ networks:
 
 volumes:
   mosquitto-data: {}
+  mosquitto-log: {}
   neo4j-data: {}
   backend-data: {}

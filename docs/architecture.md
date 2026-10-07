@@ -19,10 +19,10 @@ Status markers: ✅ implemented · ⏳ planned (phase noted).
 │                                                                                        │
 │  feeds/ ✅P1 ──► intel/ (NLP) ✅P1 ──► graph/ (STIX 2.1 → Neo4j) ✅P1                  │
 │                                              ▲                                         │
-│  detect/ ⏳P2 ──► behavior/ ⏳P2 ──► risk/ ⏳P3 ──► response/ ⏳P4 ──► nftables/DRY-RUN  │
+│  detect/ ✅P2 ──► behavior/ ✅P2 ──► risk/ ✅P3 ──► response/ ✅P4 ──► nftables/DRY-RUN  │
 │     ▲   (nmap, ARP/DHCP/mDNS, BLE)     │ explanations                 │                 │
 │     │                                  ▼                              ▼                 │
-│  mqtt/ ⏳P4-5 ◄──── telemetry ──── api/ + Socket.IO ⏳P6       audit log (DB)           │
+│  mqtt/ ✅P4-5 ◄──── telemetry ──── api/ + Socket.IO ⏳P6       audit log (DB)           │
 │                                                                                        │
 │  core/ ✅ config · logging/redaction · HMAC device IDs · health registry               │
 └───────┬───────────────────┬────────────────────────┬───────────────────────────────────┘
@@ -33,7 +33,7 @@ Status markers: ✅ implemented · ⏳ planned (phase noted).
 └───────▲──────┘    └──────────────┘        └──────────────────┘
         │ MQTT/TLS
 ┌───────┴──────┐
-│ ESP32 status │  RGB LED: NORMAL / ALERT / QUARANTINED   ⏳P5
+│ ESP32 status │  RGB LED: NORMAL / ALERT / QUARANTINED   ✅P5
 │ node         │
 └──────────────┘
 ```
@@ -422,7 +422,7 @@ first bad id. Actors include `system:risk-engine`, `system:auto-recovery`,
 
 **MQTT status node.** Commands go to `dsn/cmd/status-node`:
 `{id, ts, cmd, node_id, level, ttl, sig}` with `sig = HMAC-SHA256(DSN_MQTT_COMMAND_KEY,
-canonical JSON)`. The firmware (Phase 5) checks signature, TTL and replay. Acks
+"id|ts|cmd|node_id|level|ttl")`. The firmware (Phase 5) checks signature, TTL and replay. Acks
 on `dsn/ack/status-node` are audited and never gate enforcement. A broker
 outage never blocks a quarantine. The client is paho-mqtt v2 with TLS
 (certificate and hostname verified), credentials, and reconnect backoff up to
@@ -450,6 +450,66 @@ runs as an unprivileged user.
 - The gateway deployment (host network + capabilities) was validated as
   configuration and the driver against real nftables, not on a physical
   gateway in this environment.
+
+## Phase 5: IoT layer (broker + ESP32)
+
+```
+ESP32 (TLS, own user) ── dsn/telemetry/<user> ──► Mosquitto ──► backend TelemetryConsumer
+        ▲                                            │  (validate → Observation → registry;
+        │ dsn/cmd/status-node (HMAC-signed)          │   → TrafficEvent if no broker log)
+        └──────────────── backend ◄── dsn/ack/... ───┤
+                                                     └─ mosquitto.log ──► BrokerLogTailer
+                                                        CONNECT / not authorised / SUBSCRIBE /
+                                                        Denied PUBLISH → TrafficEvent → pipeline
+```
+
+**Broker.** eclipse-mosquitto 2.0.22, configured as follows:
+
+- **Listener.** A single TLS listener on 8883, using a lab CA with EC P-256 keys. The server certificate's SANs cover the hostnames and IPs passed to `mqtt_provision.py`.
+- **Accounts.** `allow_anonymous false`, with `$7$` PBKDF2-SHA512 password hashes.
+- **ACLs.** Deny by default. Patterns bind each device to `dsn/telemetry/%u`, `home/%u/#` and `dsn/config/%u`.
+  - `dsn-backend` alone writes `dsn/cmd/#`.
+  - `status-node` alone reads its command topic and writes its ack topic.
+- **Secret files.** An entrypoint copies the secrets into `/mosquitto/secure` with `mosquitto:0600` ownership, so the broker starts without permission warnings.
+- **Rate limiting.** Mosquitto has no per-client message-rate limit. Instead:
+  - Host-level `broker-ratelimit.nft` drops sources that open more than 30 new connections a minute, for 5 minutes.
+  - Message floods are a detection case (`mqtt_connect_flood`).
+
+**Broker log as a sensor.** With TLS, pcaps can't see MQTT packets, so the broker log is the only place that sees every CONNECT, authentication failure, SUBSCRIBE and denied PUBLISH:
+
+- `BrokerLogParser` maps client ids to IPs, using the preceding "New connection" line for refused sockets.
+- It ignores the configured service clients (`DSN_MQTT_SERVICE_CLIENTS`), so the backend's own `#` subscriptions don't trip rules.
+- It emits `TrafficEvent`s carrying `MqttInfo`. These feed the existing features and rules: `mqtt_connect_rate`, `mqtt_wildcard_subs` and `mqtt_restricted_publishes`.
+- The tailer follows truncation and rotation.
+
+The formats were captured from a real broker (`fixtures/events/mosquitto.sample.log`).
+
+**Telemetry.** `dsn/telemetry/<user>` carries `{"v":1, mac, ip, fw, uptime_s, rssi, heap, state, seq}`:
+
+- The payload is capped at 2 KiB and validated with pydantic.
+- The topic user is trusted because the ACL binds it.
+- The MAC is a device-asserted claim.
+- When no broker log is configured, telemetry also produces PUBLISH traffic events.
+
+**Firmware** (`firmware/esp32-node`, PlatformIO, Arduino on espressif32 7.1.3):
+
+- **Portable core.** `lib/dsn_core` contains SHA-256/HMAC, command parsing and verification, the LED state machine, the provisioning parser, backoff and telemetry JSON. It has no Arduino dependency and is unit-tested on the host, including the command vector shared with the backend tests.
+- **Arduino glue.** `src/main.cpp` handles:
+  - NVS and the serial provisioning console
+  - WiFi
+  - MQTT over TLS (PubSubClient; the server is verified against the lab CA)
+  - NTP
+  - LEDC PWM
+  - an optional read-only BLE GATT service
+- **Reconnects.** Exponential backoff with full jitter, from 1 s up to 60 s.
+
+### Known limitations (Phase 5)
+
+- **Firmware untested on hardware.** It compiles and its logic passes host tests, but it has not been run on a physical ESP32 here, so the WiFi/TLS/NVS paths are unverified on silicon.
+- **No mutual TLS.** Devices authenticate with passwords; they do not present client certificates.
+- **Replay cache lost on reboot.** The firmware's replay cache lives in RAM; after a reboot only the ≤ 300 s staleness window protects.
+- **NAT hides device IPs.** If clients reach the broker through NAT (e.g. Docker port publishing), the broker log shows the NAT address, so all of their activity is attributed to one source. The sample fixture shows this. Bind the broker on the lab interface (`DSN_MQTT_BIND`) or use host networking so it sees real device IPs.
+- **No message-rate limit.** There is no per-client message-rate limit at the broker (see above).
 
 ## Key design decisions
 

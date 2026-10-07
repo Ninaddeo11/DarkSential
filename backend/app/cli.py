@@ -20,6 +20,7 @@ quarantine NODE_ID [MIN]  quarantine a device (DRY_RUN: planned only)
 release NODE_ID          release a device's active quarantine
 audit [--verify]         show / verify the hash-chained audit log
 demo-phase4              offline quarantine / recovery demo
+demo-phase5              offline IoT demo (telemetry, signed commands + acks, broker log)
 """
 
 from __future__ import annotations
@@ -447,6 +448,113 @@ def demo_phase4(settings: Settings) -> None:
         rt.stop()
 
 
+def demo_phase5(settings: Settings) -> None:
+    from app.core.config import REPO_ROOT
+    from app.mqtt.brokerlog import BrokerLogParser, tail_once
+    from app.mqtt.commands import COMMAND_TOPIC, NullPublisher, verify
+
+    key = "demo-status-node-key-0123456789abcdef"
+    tmp = Path(tempfile.mkdtemp(prefix="dsn-demo5-"))
+    settings = settings.model_copy(
+        update={
+            "offline_mode": True,
+            "database_url": "sqlite://",
+            "scheduler_enabled": False,
+            "iforest_autotrain": False,
+            "xgb_autotrain": False,
+            "mqtt_command_key": SecretStr(key),
+            "mqtt_broker_log": None,
+            "models_dir": tmp / "models",
+        }
+    )
+    rt = _runtime(settings)
+    try:
+        telemetry = rt.telemetry
+        publisher = rt.response.commander.publisher
+        if telemetry is None or not isinstance(publisher, NullPublisher):
+            raise RuntimeError("demo-phase5 needs the offline runtime (no broker configured)")
+        print("== 1. Device telemetry (topic dsn/telemetry/<user>; the broker ACL binds the user)")
+        mac = "24:0a:c4:40:00:04"
+        good: dict[str, Any] = {
+            "v": 1, "mac": mac, "ip": "192.168.50.24", "fw": "0.6.0",
+            "uptime_s": 42, "rssi": -58, "heap": 201234, "state": "NORMAL", "seq": 1,
+        }  # fmt: skip
+        topic = "dsn/telemetry/esp32-node"
+        cases: list[tuple[str, str, bytes]] = [
+            ("valid", topic, json.dumps(good).encode()),
+            ("nested topic", topic + "/x", json.dumps(good).encode()),
+            ("oversized", topic, b"{" + b" " * 4096 + b"}"),
+            ("rssi out of range", topic, json.dumps(good | {"rssi": 50}).encode()),
+            ("markup in fw", topic, json.dumps(good | {"fw": "<script>x</script>"}).encode()),
+            ("not json", topic, b"\xff\xfe"),
+        ]
+        for label, t, payload in cases:
+            ok = telemetry.handle(t, payload)
+            print(f"   {label:<20} -> {'accepted' if ok else 'rejected'}")
+        node = rt.registry.resolve(mac=mac)
+        device = rt.registry.get(node) if node else None
+        if device is not None:
+            attrs = {k: device.attributes.get(k) for k in ("mqtt_user", "fw", "rssi", "state")}
+            print(f"   registry: {device.node_id} ip={device.ip} {attrs}")
+
+        print("\n== 2. Signed status-node commands, checked the way the firmware checks them")
+        print("   (reference emulation in Python; the C++ verifier itself: pio test -e native)")
+        commander = rt.response.commander
+        seen: set[str] = set()
+
+        def node_verdict(cmd: dict[str, Any], now: int) -> str:
+            if not verify(cmd, key.encode()):
+                return "bad_sig"
+            if abs(now - int(cmd["ts"])) > min(max(int(cmd["ttl"]), 1), 300):
+                return "stale"
+            if cmd["id"] in seen:
+                return "replay"
+            seen.add(cmd["id"])
+            return "ok"
+
+        sent = commander.send("QUARANTINE", node or "", "critical")
+        wire = json.loads(publisher.sent[-1][1])
+        now = int(wire["ts"])
+        commander.send("ALERT", node or "")
+        forged_wire = json.loads(publisher.sent[-1][1]) | {"cmd": "RECOVER"}  # tampered in flight
+        trials = [
+            ("genuine QUARANTINE", wire, now),
+            ("same message replayed", wire, now + 5),
+            ("ALERT altered to RECOVER", forged_wire, now),
+            ("genuine, delivered 2 min late", wire, now + 120),
+        ]
+        for label, cmd, at in trials:
+            verdict = node_verdict(cmd, at)
+            print(f"   {label:<28} -> {verdict}")
+            rt.response.on_ack(json.dumps({"id": cmd["id"], "status": verdict}).encode())
+        print(f"   command topic: {COMMAND_TOPIC}; sig={sent['sig'][:16]}... ttl={sent['ttl']}s")
+        acks = [e for e in rt.audit.entries(limit=20) if e["action"] == "mqtt_ack"]
+        for entry in reversed(acks):
+            d = entry["details"]
+            print(f"   audit: mqtt_ack cmd={d['cmd']:<11} status={d['status']}")
+
+        print("\n== 3. Broker log replay (real eclipse-mosquitto 2.0.22 capture)")
+        log_path = REPO_ROOT / "fixtures" / "events" / "mosquitto.sample.log"
+        parser = BrokerLogParser(None, frozenset(settings.mqtt_service_clients))
+        events = tail_once(log_path, parser)
+        kinds = Counter(
+            f"{e.mqtt.packet}{'' if e.ok is not False else ' (refused)'}" for e in events if e.mqtt
+        )
+        print(f"   parsed {len(events)} events: {dict(sorted(kinds.items()))}")
+        print("   (the backend's own wildcard subscriptions are excluded as a service client)")
+        rt.pipeline.ingest(events)
+        hits = {h.rule_id: h for r in rt.pipeline.flush() for h in r.rule_hits}
+        for hit in hits.values():
+            print(f"   rule {hit.rule_id:<28} {hit.severity:<8} {','.join(hit.techniques)}")
+        print(
+            "   note: every client in this capture reached the broker via the Docker NAT\n"
+            "   address 172.17.0.1, so all activity is attributed to that one source."
+        )
+        print("\nPhase 5 demo OK")
+    finally:
+        rt.stop()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -474,6 +582,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("demo-phase2")
     sub.add_parser("demo-phase3")
     sub.add_parser("demo-phase4")
+    sub.add_parser("demo-phase5")
     quar = sub.add_parser("quarantine")
     quar.add_argument("node_id")
     quar.add_argument("minutes", nargs="?", type=int)
@@ -501,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "demo-phase4":
         demo_phase4(settings)
+        return 0
+    if args.cmd == "demo-phase5":
+        demo_phase5(settings)
         return 0
     if args.cmd == "scan":
         from app.detect.nmap_scan import scan

@@ -97,6 +97,63 @@ jobs:
       - run: uv sync --frozen --all-extras
       - run: uv run pytest -q -p no:cacheprovider tests/test_response_drivers.py
 
+  iot:
+    # Real Mosquitto: TLS, provisioned passwords, ACLs, broker log -> behavior rules.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0  # publishes full version tags only
+        with:
+          version: "0.12.17"
+          python-version: "3.13"
+      - run: uv sync --frozen --all-extras
+      - name: provision broker PKI + credentials
+        run: |
+          uv run python ../scripts/mqtt_provision.py --out data/mqtt-it --host localhost \
+            --device esp32-node --device rogue-sensor --no-firmware
+          mkdir -p data/mqtt-it/log
+      - name: start mosquitto
+        run: |
+          M="$GITHUB_WORKSPACE/infra/mosquitto"; W="$PWD/data/mqtt-it"
+          docker run -d --name mosq -p 8883:8883 --entrypoint /bin/sh \
+            -v "$M/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
+            -v "$M/entrypoint.sh:/entrypoint.sh:ro" -v "$M/config/acl:/mosquitto/src/acl:ro" \
+            -v "$W/passwd:/mosquitto/src/passwd:ro" -v "$W/certs:/mosquitto/src/certs:ro" \
+            -v "$W/log:/mosquitto/log" eclipse-mosquitto:2.0.22 /entrypoint.sh
+          for i in $(seq 1 30); do nc -z localhost 8883 && break; sleep 1; done
+      - name: integration tests
+        env:
+          DSN_TEST_MQTT_DIR: data/mqtt-it
+          DSN_TEST_MQTT_HOST: localhost
+          DSN_TEST_MQTT_PORT: "8883"
+          DSN_TEST_MQTT_LOG: data/mqtt-it/log/mosquitto.log
+        run: uv run pytest -q -p no:cacheprovider tests/test_mqtt_integration.py
+      - if: always()
+        run: docker logs mosq | tail -20
+
+  firmware:
+    # ESP32 firmware: host unit tests for the security logic + both device builds.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware/esp32-node
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware/esp32-node/platformio.ini') }}
+      - uses: astral-sh/setup-uv@v10.2.0  # publishes full version tags only
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+      - run: uv tool install platformio==6.2.0
+      - run: pio test -e native
+      - run: pio run -e esp32dev -e esp32dev_ble
+
   demo:
     runs-on: ubuntu-latest
     needs: backend
@@ -113,3 +170,4 @@ jobs:
       - run: make demo-phase2
       - run: make demo-phase3
       - run: make demo-phase4
+      - run: make demo-phase5
