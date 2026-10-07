@@ -15,6 +15,7 @@ def cli_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DSN_DATABASE_URL", f"sqlite:///{(tmp_path / 'cli.sqlite3').as_posix()}")
     monkeypatch.setenv("DSN_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("DSN_OFFLINE_MODE", "true")
+    monkeypatch.setenv("DSN_XGB_AUTOTRAIN", "false")
 
 
 def test_demo_phase1(cli_env: None, capsys: pytest.CaptureFixture[str]) -> None:

@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     models_dir: Path = Path("./data/models")
     # Train the Isolation Forest at startup when no (valid) model exists.
     iforest_autotrain: bool = True
+    risk_config_path: Path = BACKEND_ROOT / "config" / "risk.yaml"
+    # Train the XGBoost comparison model at startup when no valid model exists.
+    xgb_autotrain: bool = True
     nmap_interval_minutes: int = Field(default=30, ge=5)
     # Discovery sources. Each also needs a runtime capability check to start.
     # Active nmap scans additionally require DSN_DRY_RUN=false.

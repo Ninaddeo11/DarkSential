@@ -284,37 +284,68 @@ class Neo4jGraphStore:
         if not 1 <= max_hops <= 5:
             raise ValueError("max_hops must be 1..5")
         results: list[RelatedThreat] = []
-        for key in observable_keys_for_ioc(ioc):
-            indicators = self._run(
-                """
-                MATCH (:Observable {key: $key})<-[:OBSERVES]-(i:Indicator)
-                RETURN i {.id, .name, .external_id, .confidence, .sources, .stale,
-                          label: 'Indicator'} AS i
-                ORDER BY i.id
-                """,
-                key=key,
-            )
-            for row in indicators:
-                indicator = row["i"]
-                rows = self._run(
-                    f"""
-                    MATCH p = (i:StixObject {{id: $id}})-[rels*1..{int(max_hops)}]-(t:StixObject)
-                    WHERE all(r IN rels WHERE NOT type(r) IN $non_stix)
-                      AND all(n IN nodes(p)[1..-1]
-                              WHERE none(l IN labels(n) WHERE l IN $terminal))
-                      AND none(n IN nodes(p) WHERE n:Identity)
-                    RETURN [n IN nodes(p) | n {{.id, .name, .external_id, .confidence,
-                              .sources, .stale,
-                              label: [l IN labels(n) WHERE l <> 'StixObject'][0]}}] AS nodes,
-                           [r IN relationships(p) | type(r)] AS rels
-                    """,
-                    id=indicator["id"],
-                    non_stix=_NON_STIX_RELS,
-                    terminal=sorted(TERMINAL_LABELS),
-                )
-                paths = [RawPath(tuple(r["nodes"]), tuple(r["rels"])) for r in rows]
-                results.extend(select_best_paths(indicator, paths, THREAT_LABELS))
+        for indicator in self.indicators_for(ioc):
+            results.extend(self._related(indicator, max_hops))
         return merge_related(results)
+
+    def related_from_node(self, node_id: str, max_hops: int = 3) -> list[RelatedThreat]:
+        if not 1 <= max_hops <= 5:
+            raise ValueError("max_hops must be 1..5")
+        rows = self._run(
+            """
+            MATCH (n:StixObject {id: $id})
+            RETURN n {.id, .name, .external_id, .confidence, .sources, .stale,
+                      label: [l IN labels(n) WHERE l <> 'StixObject'][0]} AS n
+            """,
+            id=node_id,
+        )
+        return merge_related(self._related(rows[0]["n"], max_hops)) if rows else []
+
+    def _related(self, start: dict[str, Any], max_hops: int) -> list[RelatedThreat]:
+        rows = self._run(
+            f"""
+            MATCH p = (i:StixObject {{id: $id}})-[rels*1..{int(max_hops)}]-(t:StixObject)
+            WHERE all(r IN rels WHERE NOT type(r) IN $non_stix)
+              AND all(n IN nodes(p)[1..-1]
+                      WHERE none(l IN labels(n) WHERE l IN $terminal))
+              AND none(n IN nodes(p) WHERE n:Identity)
+            RETURN [n IN nodes(p) | n {{.id, .name, .external_id, .confidence,
+                      .sources, .stale,
+                      label: [l IN labels(n) WHERE l <> 'StixObject'][0]}}] AS nodes,
+                   [r IN relationships(p) | type(r)] AS rels
+            """,
+            id=start["id"],
+            non_stix=_NON_STIX_RELS,
+            terminal=sorted(TERMINAL_LABELS),
+        )
+        paths = [RawPath(tuple(r["nodes"]), tuple(r["rels"])) for r in rows]
+        return select_best_paths(start, paths, THREAT_LABELS)
+
+    def indicators_for(self, ioc: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for key in observable_keys_for_ioc(ioc):
+            out += [
+                r["i"]
+                for r in self._run(
+                    """
+                    MATCH (:Observable {key: $key})<-[:OBSERVES]-(i:Indicator)
+                    RETURN i {.id, .name, .external_id, .confidence, .sources, .stale,
+                              .pattern, label: 'Indicator'} AS i
+                    ORDER BY i.id
+                    """,
+                    key=key,
+                )
+            ]
+        return out
+
+    def node_by_name(self, label: str, name: str) -> str | None:
+        if label not in ALL_LABELS:
+            raise ValueError(f"unknown label {label!r}")
+        rows = self._run(
+            f"MATCH (n:{_assert_identifier(label)} {{name: $name}}) RETURN n.id AS id LIMIT 1",
+            name=name,
+        )
+        return str(rows[0]["id"]) if rows else None
 
     def cves_for_cpe(self, cpe: str) -> list[CveMatch]:
         target = Cpe.parse(cpe)

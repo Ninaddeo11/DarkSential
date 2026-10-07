@@ -76,8 +76,20 @@ class EventBus:
                 log.exception("event handler failed", extra={"event_type": event.type})
         return event
 
-    def emit(self, type_: EventType, node_id: str | None = None, **payload: Any) -> Event:
-        return self.publish(Event(type=type_, node_id=node_id, payload=payload))
+    def emit(
+        self,
+        type_: EventType,
+        node_id: str | None = None,
+        *,
+        ts: datetime | None = None,
+        **payload: Any,
+    ) -> Event:
+        """Publish an event. ``ts`` is *domain* time (observation / window end);
+        it defaults to now. Replays therefore stay consistent with their data."""
+        event = Event(type=type_, node_id=node_id, payload=payload)
+        if ts is not None:
+            event.ts = ts
+        return self.publish(event)
 
     def recent(
         self, limit: int = 100, node_id: str | None = None, after_seq: int = 0

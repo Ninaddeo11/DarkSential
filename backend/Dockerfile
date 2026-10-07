@@ -6,7 +6,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /srv
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --extra lab
+RUN uv sync --frozen --no-dev --extra lab --extra ml
 
 FROM python:3.13.15-slim-trixie
 RUN useradd --system --uid 10001 --home-dir /srv dsn

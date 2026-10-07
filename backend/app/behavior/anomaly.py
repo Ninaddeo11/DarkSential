@@ -55,7 +55,14 @@ class IForestModel:
     meta: dict[str, Any]
 
     def score(self, vector: Vector) -> float:
-        return float(-self.model.score_samples([_row(vector)])[0])
+        return self.score_many([vector])[0]
+
+    def score_many(self, vectors: Sequence[Vector]) -> list[float]:
+        # One call for many rows: scikit-learn's per-call overhead (joblib dispatch
+        # per tree) dominates single-row scoring.
+        if not vectors:
+            return []
+        return [float(s) for s in -self.model.score_samples([_row(v) for v in vectors])]
 
     @classmethod
     def train(cls, vectors: Sequence[Vector], *, n_estimators: int, seed: int) -> IForestModel:
@@ -131,7 +138,14 @@ class AnomalyScorer:
         self.cfg = cfg
         self.model = model
 
-    def score(self, vector: Vector, view: BaselineView) -> AnomalyResult:
+    def if_scores(self, vectors: Sequence[Vector]) -> list[float | None]:
+        if self.model is None:
+            return [None] * len(vectors)
+        return list(self.model.score_many(vectors))
+
+    def score(
+        self, vector: Vector, view: BaselineView, if_raw: float | None = None
+    ) -> AnomalyResult:
         weights = self.cfg.weights
         parts: list[tuple[float, float]] = []
         z_comp = max_z = None
@@ -139,9 +153,10 @@ class AnomalyScorer:
             max_z = max(abs(z) for z in view.zscores.values())
             z_comp = min(1.0, max_z / self.cfg.z_saturation)
             parts.append((weights["zscore"], z_comp))
-        if_comp = if_raw = None
+        if_comp = None
         if self.model is not None:
-            if_raw = self.model.score(vector)
+            if if_raw is None:
+                if_raw = self.model.score(vector)
             spread = max(self.model.p99 - self.model.p50, 1e-6)
             if_comp = min(1.0, max(0.0, (if_raw - self.model.p50) / (2 * spread)))
             parts.append((weights["iforest"], if_comp))

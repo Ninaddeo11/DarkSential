@@ -14,11 +14,14 @@ replay FILE              feed a .jsonl (TrafficEvent per line) or .pcap through 
 train-model              (re)train and sign the Isolation Forest
 rules                    list detection rules and their ATT&CK links
 demo-phase2              offline devices + behavior demo (nmap fixture + simulated attacks)
+risk NODE_ID             assess and explain one device now
+demo-phase3              offline explainable-risk demo
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import sys
 import tempfile
@@ -67,7 +70,13 @@ def _print_runs(rt: LabRuntime, names: list[str]) -> None:
 
 def demo_phase1(settings: Settings) -> None:
     settings = settings.model_copy(
-        update={"offline_mode": True, "database_url": "sqlite://", "scheduler_enabled": False}
+        update={
+            "offline_mode": True,
+            "database_url": "sqlite://",
+            "scheduler_enabled": False,
+            "iforest_autotrain": False,
+            "xgb_autotrain": False,
+        }
     )
     rt = _runtime(settings)
     try:
@@ -131,6 +140,7 @@ def demo_phase2(settings: Settings) -> None:
             "scheduler_enabled": False,
             "models_dir": Path(tempfile.mkdtemp(prefix="dsn-models-")),
             "iforest_autotrain": True,
+            "xgb_autotrain": False,
         }
     )
     rt = _runtime(settings)
@@ -217,6 +227,99 @@ def demo_phase2(settings: Settings) -> None:
         rt.stop()
 
 
+def _print_decision(d: Any, name: str) -> None:
+    print(f"\n-- {name} ({d.node_id})")
+    print(f"   {d.explanation}")
+    print(f"   {'factor':<20}{'value':>7}{'weight':>8}{'contribution':>14}")
+    for c in d.contributions:
+        print(f"   {c.factor:<20}{c.value:>7.3f}{c.weight:>8.2f}{c.contribution:>14.2f}")
+    print(f"   {'= score':<35}{d.score:>14.2f}  ({d.level}, action: {d.action})")
+    for path in d.evidence_paths[:2]:
+        chain = " -> ".join(f"{s.via + ' ' if s.via else ''}{s.label}:{s.name}" for s in path)
+        print(f"   evidence path: {chain}")
+    if d.ml:
+        shap = ", ".join(f"{k} {v:+.2f}" for k, v in list(d.ml.shap.items())[:3])
+        print(f"   ML (comparison only): XGBoost p(attack)={d.ml.probability:.3f}; SHAP: {shap}")
+
+
+def demo_phase3(settings: Settings) -> None:
+    from app.behavior.events import TrafficEvent
+    from app.detect.nmap_scan import parse_nmap_xml
+    from app.simulation.traffic import TrafficSimulator
+
+    gateway = "192.168.50.1"
+    settings = settings.model_copy(
+        update={
+            "offline_mode": True,
+            "database_url": "sqlite://",
+            "scheduler_enabled": False,
+            "models_dir": Path(tempfile.mkdtemp(prefix="dsn-models-")),
+            "iforest_autotrain": True,
+            "xgb_autotrain": True,
+            "protected_hosts": [ipaddress.ip_address(gateway)],
+        }
+    )
+    rt = _runtime(settings)
+    try:
+        start = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
+        print("== Threat intel (offline fixtures) + discovery (nmap fixture)")
+        for feed in ("mitre_attack", "cisa_kev", "nvd_cve", "feodo", "threatfox"):
+            rt.runner.run(feed)
+        rt.link_rules()
+        for obs in parse_nmap_xml(
+            (settings.fixtures_dir / "events" / "lab-scan.nmap.xml").read_bytes()
+        ):
+            rt.registry.observe(obs.model_copy(update={"ts": start}))
+        ml = "XGBoost + SHAP attached" if rt.risk.ml else "no ML stack on this host"
+        print(f"  devices: {len(rt.registry.list())}; ML comparison: {ml}")
+
+        print("\n== 40 min baseline traffic, then esp32-node floods MQTT and contacts a Feodo C2")
+        sim = TrafficSimulator(seed=7)
+        esp = sim.device("esp32-node")
+        t_attack = start + timedelta(minutes=40)
+        events = [le.event for le in sim.normal(start, 43)]
+        events += [le.event for le in sim.mqtt_flood(esp, t_attack, minutes=2, per_minute=500)]
+        events.append(
+            TrafficEvent(
+                ts=t_attack + timedelta(seconds=30),
+                src_mac=esp.mac,
+                src_ip=esp.ip,
+                dst_ip="162.243.103.246",
+                dst_port=8080,
+                proto="tcp",
+                bytes=74,
+            )
+        )
+        rt.pipeline.ingest(events)
+        rt.pipeline.flush()
+        names = {d.ip: d.name for d in sim.fleet} | {gateway: "archer-gw", "192.168.50.2": "broker"}
+
+        print("\n== Risk (latest decision per device, highest first)")
+        print(f"  {'device':<13}{'score':>6}  {'level':<9}{'action':<19}top factor")
+        rows = rt.risk.latest_all()
+        for row in rows:
+            dev = rt.registry.get(row["node_id"])
+            top = max(row["contributions"], key=lambda c: c["contribution"])
+            label = f"{top['factor']} +{top['contribution']:g}" if top["contribution"] else "-"
+            print(
+                f"  {names.get((dev.ip or '') if dev else '', row['node_id']):<13}"
+                f"{row['score']:>6.1f}  {row['level']:<9}{row['action']:<19}{label}"
+            )
+
+        for ip, name in ((gateway, "archer-gw (protected host)"), (esp.ip, "esp32-node")):
+            node_id = rt.registry.resolve(ip=ip)
+            decision = (
+                rt.risk.assess(node_id, now=t_attack + timedelta(minutes=2)) if node_id else None
+            )
+            if decision:
+                _print_decision(decision, name)
+        events_seen = Counter(e.type for e in rt.bus.recent(limit=5000))
+        print("\n  events:", dict(sorted(events_seen.items())))
+        print("\nPhase 3 demo OK")
+    finally:
+        rt.stop()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -242,6 +345,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("train-model")
     sub.add_parser("rules")
     sub.add_parser("demo-phase2")
+    sub.add_parser("demo-phase3")
+    risk_p = sub.add_parser("risk")
+    risk_p.add_argument("node_id")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -254,6 +360,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "demo-phase2":
         demo_phase2(settings)
+        return 0
+    if args.cmd == "demo-phase3":
+        demo_phase3(settings)
         return 0
     if args.cmd == "scan":
         from app.detect.nmap_scan import scan
@@ -288,6 +397,12 @@ def main(argv: list[str] | None = None) -> int:
             _dump([m.model_dump() for m in rt.graph.cves_for_cpe(args.cpe)])
         elif args.cmd == "extract":
             _dump(rt.runner.extractor().extract(args.text).model_dump())
+        elif args.cmd == "risk":
+            decision = rt.risk.assess(args.node_id, trigger="cli")
+            if decision is None:
+                print(f"unknown device {args.node_id}", file=sys.stderr)
+                return 1
+            _dump(decision.model_dump(mode="json"))
         elif args.cmd == "devices":
             _dump([d.model_dump() for d in rt.registry.list()])
         elif args.cmd == "approve":

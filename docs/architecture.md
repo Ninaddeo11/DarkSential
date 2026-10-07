@@ -287,6 +287,83 @@ keeping run history.
 - nmap OS CPEs in the fixture are synthetic. Real nmap OS CPEs are often
   coarser (vendor/product without firmware version).
 
+## Phase 3: explainable risk engine
+
+```
+bus events (DEVICE_CONNECTED / DEVICE_PROFILED / ANOMALY_DETECTED, domain-timestamped)
+   └─► RiskEngine.assess(node)
+         factors (each value in [0,1], each with typed evidence)
+           unknown_device      trust: unknown 1.0 · known 0.25 · approved 0
+           rate_anomaly        max(anomaly score, severity of flood/scan/brute/deauth rules), 15-min lookback
+           protocol_anomaly    max(severity of drift/wildcard/restricted rules, 0.3 if new protocol now)
+           threat_intel        max(KEV CVE on device, IOC contact in lookback, actor/campaign link)
+                               (single low-confidence source capped at 0.5: threat model F1)
+           vulnerable_service  max(CVSS/10 x CPE-guess confidence x match quality)
+         linear score = sum(w_f * v_f * 100)   (config/risk.yaml, weights sum to 1)
+         level by thresholds -> action (protected hosts never "quarantine")
+         explanation text + evidence paths (Device->CPE->CVE, Indicator->...->Malware/Actor)
+         + XGBoost probability & SHAP (comparison only)
+   └─► risk_decisions table · RISK_UPDATED (on change) · THREAT_CORRELATED (first intel hit)
+```
+
+**Machine-readable decisions.** Each decision stores, per factor, (value,
+weight, contribution) with contribution = round(weight × value × 100, 2), and
+the score is the exact sum. Property tests (Hypothesis, random valid configs)
+check that the score stays in [0, 100], the contributions sum to the score,
+and the score is monotonic in every factor.
+
+**Evidence paths.** CVE evidence is `Device → RUNS → CPE → AFFECTED_BY →
+Vulnerability`. IOC and actor evidence reuse the Phase 1 graph paths (e.g.
+`Indicator → INDICATES → Malware`). `related_from_node` also finds actors that
+reach a KEV CVE through dark-web Reports. Lab-internal destinations are never
+treated as IOCs.
+
+**Domain time.** Bus events carry observation or window time, not publish
+time, so lookbacks behave the same in replays and live operation.
+
+**XGBoost + SHAP (comparison only).** Supervised on simulated labelled windows
+(seeds 100–109; evaluation seeds 1–20 are disjoint), using the log1p behavior
+features. `shap.TreeExplainer` gives exact local attributions in log-odds:
+base + Σ SHAP = logit(p), which is tested. Global importance is mean |SHAP|. The
+model is stored as XGBoost JSON (not a pickle) and HMAC-signed. Each decision
+explains the device's *most anomalous* window in the lookback.
+
+### Ablation (docs/evaluation/ablation.ipynb, executed)
+
+Held-out seeds 1–10: 4,760 windows, 160 attack windows. Measured:
+
+| method | ROC-AUC | precision | recall | FPR |
+|---|---|---|---|---|
+| rules | 0.969 | 1.000 | 0.938 | 0 |
+| z-score | 0.950 | 0.837 | 0.675 | 0.0046 |
+| Isolation Forest | 0.894 | 0.864 | 0.119 | 0.0007 |
+| z + IF (combined) | 0.936 | 1.000 | 0.669 | 0 |
+| **pipeline (rules OR combined)** | 0.984 | **1.000** | **0.969** | **0** |
+| linear risk (window part) | 0.997 | 0.802 | 0.888 | 0.0076 |
+| XGBoost (in-distribution upper bound) | 1.000 | 0.994 | 1.000 | 0.0002 |
+
+Takeaways:
+- The rules carry most of the detection.
+- The Isolation Forest is weak alone: it can't split on features that are
+  constant in normal training data (wildcard and restricted publishes). Its
+  value is suppressing z-score false positives (z alone: 21 FP → z + IF: 0).
+- The transparent linear scorer ranks almost as well as XGBoost (AUC 0.997 vs
+  1.000) while staying fully explainable.
+- XGBoost's perfect score is an artifact of training and testing on the same
+  generator.
+
+All of this is **simulated** traffic. Phase 7 re-measures on labelled data.
+
+### Known limitations (Phase 3)
+
+- Weights and thresholds are expert-set, not learned. The ablation shows the
+  ranking is good but the operating point is a policy choice.
+- A device's CPE guesses are inferred; wrong guesses produce wrong CVE
+  evidence, discounted by guess confidence and match quality.
+- Risk is reassessed on events. A device that goes quiet keeps its last score
+  until the next event (periodic re-scoring is a Phase 4 scheduler job).
+- XGBoost is only as good as its labels: simulated attacks here.
+
 ## Key design decisions
 
 - **App factory, no global app.** Tests build isolated apps from explicit

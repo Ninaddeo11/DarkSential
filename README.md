@@ -16,7 +16,7 @@ streams everything to a real-time 3D command center.
 | 0 | Scaffold, config, logging, health, CI, architecture and threat model | ✅ done |
 | 1 | Threat-intel feeds → STIX 2.1 → Neo4j, NLP | ✅ done |
 | 2 | Device discovery and behavior baselines | ✅ done |
-| 3 | Explainable risk engine | ⏳ |
+| 3 | Explainable risk engine | ✅ done |
 | 4 | Quarantine and recovery | ⏳ |
 | 5 | Mosquitto TLS/ACL and ESP32 firmware | ⏳ |
 | 6 | Real-time API and 3D command center | ⏳ |
@@ -32,6 +32,8 @@ make setup          # install deps (incl. the `lab` extra); creates .env with ge
 make demo-phase0    # boot the API offline, print health/readiness, shut down
 make demo-phase1    # offline intel demo: 7 feeds -> STIX 2.1 -> graph -> queries + NLP
 make demo-phase2    # devices + behavior: nmap fixture, simulated traffic + attacks -> detections
+make demo-phase3    # explainable risk: scored decisions, contributions, evidence paths, SHAP
+make ablation       # re-run the executed ablation notebook (docs/evaluation/)
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
 make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
 ```
@@ -134,6 +136,24 @@ uv run python -m app.cli approve dev-0123456789abcdef
 
 Read-only API: `GET /api/devices`, `/api/devices/{node_id}`, `/api/detections`,
 `/api/events`, `/api/rules`, `/api/discovery/capabilities`.
+
+### Explainable risk (Phase 3)
+
+Every device gets a score from a transparent linear model
+(`backend/config/risk.yaml`, weights sum to 1), built from five factors: unknown
+device, rate anomaly, protocol anomaly, threat-intel correlation and vulnerable
+service. Each decision stores every factor's value, weight and contribution
+(they sum to the score), a plain-English explanation, the recommended action and
+the graph evidence paths. An XGBoost model with SHAP explanations is attached for
+comparison and never changes the decision. See the
+[ablation notebook](docs/evaluation/ablation.ipynb).
+
+```bash
+cd backend && uv run python -m app.cli risk dev-0123456789abcdef
+```
+
+Read-only API: `GET /api/risk` (all devices, highest first), `/api/risk/{node_id}`
+(latest + history), `/api/risk/model` (weights, thresholds, SHAP importances).
 
 ## Configuration
 

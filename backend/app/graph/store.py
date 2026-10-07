@@ -119,6 +119,16 @@ class GraphStore(Protocol):
 
     def related_threats(self, ioc: str, max_hops: int = 3) -> list[RelatedThreat]: ...
 
+    def related_from_node(self, node_id: str, max_hops: int = 3) -> list[RelatedThreat]:
+        """Threats reachable from any STIX node (e.g. a CVE), same path rules."""
+        ...
+
+    def indicators_for(self, ioc: str) -> list[dict[str, Any]]:
+        """Indicators observing an IOC: id, name, confidence, sources, stale, pattern."""
+        ...
+
+    def node_by_name(self, label: str, name: str) -> str | None: ...
+
     def cves_for_cpe(self, cpe: str) -> list[CveMatch]: ...
 
     def link_rule(self, rule_id: str, technique_ids: Sequence[str], rationale: str) -> list[str]:

@@ -78,6 +78,7 @@ def make_settings(tmp_path: Path) -> SettingsFactory:
             "offline_mode": True,
             "models_dir": tmp_path / "models",
             "iforest_autotrain": False,
+            "xgb_autotrain": False,
         }
         values.update(overrides)
         return Settings(_env_file=None, **values)

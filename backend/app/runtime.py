@@ -33,6 +33,9 @@ from app.feeds.scheduler import FeedScheduler
 from app.feeds.status import FeedStatusResponse
 from app.graph.memory import InMemoryGraphStore
 from app.graph.store import GraphStore
+from app.risk.config import load_risk_config
+from app.risk.engine import RiskEngine
+from app.risk.ml import XgbModel
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +76,32 @@ def load_or_train_model(settings: Settings, cfg: BehaviorConfig) -> IForestModel
     return model
 
 
+def load_or_train_xgb(settings: Settings, cfg: BehaviorConfig) -> XgbModel | None:
+    key = settings.device_id_hmac_key.get_secret_value().encode("utf-8")
+    directory = settings.models_dir
+    try:
+        return XgbModel.load(directory, key)
+    except FileNotFoundError:
+        pass
+    except ModelIntegrityError as exc:
+        log.error("XGBoost model rejected; retraining", extra={"error": str(exc)})
+    except ImportError as exc:
+        log.warning("XGBoost unavailable on this host", extra={"error": str(exc)})
+        return None
+    if not settings.xgb_autotrain:
+        return None
+    try:
+        from app.risk.ml import train_default
+
+        model = train_default(cfg)
+    except ImportError as exc:
+        log.warning("XGBoost/SHAP unavailable on this host", extra={"error": str(exc)})
+        return None
+    model.save(directory, key)
+    log.info("XGBoost risk comparison model trained", extra={"samples": model.meta["n_samples"]})
+    return model
+
+
 @dataclass
 class LabRuntime:
     settings: Settings
@@ -86,6 +115,7 @@ class LabRuntime:
     rules: RuleEngine
     pipeline: BehaviorPipeline
     behavior_cfg: BehaviorConfig
+    risk: RiskEngine
     _services: list[Any] = field(default_factory=list)
 
     @classmethod
@@ -110,6 +140,17 @@ class LabRuntime:
         rules = RuleEngine.load(settings.rules_config_path)
         scorer = AnomalyScorer(behavior_cfg.anomaly, load_or_train_model(settings, behavior_cfg))
         pipeline = BehaviorPipeline(registry, behavior_cfg, rules, scorer, bus, sessions)
+        risk = RiskEngine(
+            settings,
+            load_risk_config(settings.risk_config_path),
+            registry,
+            pipeline,
+            graph,
+            sessions,
+            bus,
+            ml=load_or_train_xgb(settings, behavior_cfg),
+        )
+        bus.subscribe(risk.on_event)
         caps = capabilities.report(settings)
         named = {"trust_refresh": TRUST_REFRESH_SECONDS}
         if caps["nmap"].active:
@@ -129,6 +170,7 @@ class LabRuntime:
             rules,
             pipeline,
             behavior_cfg,
+            risk,
         )
         runner.on_success.append(rt._on_feed_success)
         return rt

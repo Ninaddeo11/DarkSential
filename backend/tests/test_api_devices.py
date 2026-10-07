@@ -92,7 +92,14 @@ def test_phase1_database_is_stamped_and_upgraded(tmp_path: Path) -> None:
     engine.dispose()
     con = sqlite3.connect(db)
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"feed_runs", "devices", "detections", "device_baselines", "alembic_version"} <= tables
-    assert con.execute("SELECT version_num FROM alembic_version").fetchone() == ("0002",)
+    assert {
+        "feed_runs",
+        "devices",
+        "detections",
+        "device_baselines",
+        "risk_decisions",
+        "alembic_version",
+    } <= tables
+    assert con.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003",)
     assert con.execute("SELECT count(*) FROM feed_runs").fetchone() == (1,)  # history kept
     con.close()

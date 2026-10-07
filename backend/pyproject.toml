@@ -35,12 +35,23 @@ lab = [
     "stix2==3.0.2",
     "stix2-patterns==2.1.2",
 ]
+ml = [
+    "matplotlib==3.11.2",
+    "pandas==3.0.6",
+    "shap==0.51.0 ; python_full_version < '3.12'",
+    "shap==0.52.0 ; python_full_version >= '3.12'",
+    "xgboost-cpu==3.2.0 ; python_full_version < '3.12'",
+    "xgboost-cpu==3.4.1 ; python_full_version >= '3.12'",
+]
 
 [dependency-groups]
 dev = [
     "httpx2==2.13.1",  # starlette's TestClient transport
     "hypothesis==6.168.3",
+    "ipykernel==7.4.0",
     "mypy==2.4.0",
+    "nbclient==0.11.0",
+    "nbformat==5.11.1",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "pytest-github-actions-annotate-failures==0.4.2",
@@ -78,6 +89,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S104", "S105", "S106", "S311", "S603", "ANN"]  # seeded RNGs, fixed-arg subprocess, 0.0.0.0 literals in packets
 "app/simulation/**" = ["S311"]  # deterministic seeded simulation, not crypto
+"app/risk/dataset.py" = ["S311"]  # seeded scenario generation, not crypto
 
 # --- mypy ---------------------------------------------------------------------
 [tool.mypy]
@@ -91,7 +103,7 @@ files = ["app", "tests", "../api"]
 
 [[tool.mypy.overrides]]
 # Untyped third-party packages.
-module = ["stix2.*", "stix2patterns.*", "apscheduler.*", "nmap.*", "sklearn.*", "joblib.*"]
+module = ["stix2.*", "stix2patterns.*", "apscheduler.*", "nmap.*", "sklearn.*", "joblib.*", "shap.*", "xgboost.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]
@@ -103,7 +115,11 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # shap (third party) triggers this matplotlib notice at import time.
+    "ignore:The set_bad function will be deprecated:PendingDeprecationWarning",
+]
 markers = ["neo4j: needs a Neo4j server (DSN_TEST_NEO4J_URI)"]
 
 [tool.coverage.run]

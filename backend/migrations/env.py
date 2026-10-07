@@ -8,7 +8,7 @@ from alembic import context
 from sqlalchemy import Connection
 
 from app.core.db import Base
-from app.models import device, feed_run  # noqa: F401 - register tables
+from app.models import device, feed_run, risk  # noqa: F401 - register tables
 
 target_metadata = Base.metadata
 config = context.config

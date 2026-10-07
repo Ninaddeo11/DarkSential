@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.4.0] Phase 3: Explainable risk engine, 2026-10-07
+
+### Added
+- **Linear risk scorer** (`config/risk.yaml`): five factors in [0, 1], weights
+  validated to sum to 1, thresholds LOW/MEDIUM/HIGH/CRITICAL, actions per
+  level. Contributions sum exactly to the score.
+- **Risk engine:** factors with typed evidence (detections, CVE/KEV matches,
+  IOC contacts, actor links), human-readable explanation, recommended action
+  (protected hosts never `quarantine`), graph evidence paths, persisted
+  `risk_decisions`, `RISK_UPDATED` / `THREAT_CORRELATED` events, event-driven
+  reassessment.
+- **XGBoost + SHAP** comparison model (TreeExplainer, local + global), stored as
+  signed JSON, attached to each decision for the most anomalous lookback window.
+- **Ablation** notebook (executed) with CSVs and ROC/SHAP plots in `docs/evaluation/`.
+- Graph: `related_from_node`, `indicators_for`, `node_by_name` (both stores).
+- API `/api/risk*`; CLI `risk`, `demo-phase3`; `make ablation`.
+- Hypothesis properties: score in [0, 100], monotonic per factor, contributions
+  sum to the score.
+
+### Fixed / found during this phase
+- Events now carry domain time (observation / window end), so risk lookbacks
+  work in replays. Detections are published only after commit.
+- The risk engine checks IOC contacts and runs the ML explanation over the whole
+  lookback, not just the latest window (a C2 contact before a quiet window was
+  being missed).
+- Isolation Forest scoring is batched per window-close step (it was about 60 ms
+  per call), and the forest uses 100 trees (same accuracy over 20 seeds).
+- The ablation showed the IF could not see connect/auth features that are
+  constant in training. The simulator now includes benign MQTT reconnects with
+  occasional auth failures (more realistic, and IF AUC 0.85 → 0.89).
+
+### Verification
+- Detection over 20 seeds: 140/140 attack windows, 0 FP / 3,453 normal windows (z + IF).
+- Ablation (held-out seeds 1-10, 4,760 windows): pipeline precision 1.000,
+  recall 0.969, FPR 0. Table in docs/architecture.md.
+
+### Known limitations
+- Simulated traffic only. Expert-set weights. CPE guesses can be wrong
+  (discounted by confidence). Quiet devices aren't re-scored until Phase 4's
+  periodic job.
+
 ## [0.3.0] Phase 2: Device detection & behavior, 2026-10-07
 
 ### Added

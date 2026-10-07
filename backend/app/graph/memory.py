@@ -203,10 +203,33 @@ class InMemoryGraphStore:
         with self._lock:
             for key in observable_keys_for_ioc(ioc):
                 for ind_id in sorted(self._observables.get(key, ())):
-                    indicator = self._nodes[ind_id]
-                    paths = list(self._paths_from(ind_id, max_hops))
-                    results.extend(select_best_paths(indicator.view(), paths, THREAT_LABELS))
+                    results.extend(self._related(ind_id, max_hops))
         return merge_related(results)
+
+    def related_from_node(self, node_id: str, max_hops: int = 3) -> list[RelatedThreat]:
+        with self._lock:
+            if node_id not in self._nodes:
+                return []
+            return merge_related(self._related(node_id, max_hops))
+
+    def _related(self, start: str, max_hops: int) -> list[RelatedThreat]:
+        paths = list(self._paths_from(start, max_hops))
+        return select_best_paths(self._nodes[start].view(), paths, THREAT_LABELS)
+
+    def indicators_for(self, ioc: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                {**self._nodes[i].view(), "pattern": self._nodes[i].props.get("pattern")}
+                for key in observable_keys_for_ioc(ioc)
+                for i in sorted(self._observables.get(key, ()))
+            ]
+
+    def node_by_name(self, label: str, name: str) -> str | None:
+        with self._lock:
+            for node in self._nodes.values():
+                if node.label == label and node.props.get("name") == name:
+                    return node.id
+        return None
 
     def _adjacent(self, node_id: str) -> Iterator[tuple[_Edge, str]]:
         for edge in self._edges.values():

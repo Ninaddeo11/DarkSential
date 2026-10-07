@@ -93,7 +93,36 @@ class TrafficSimulator:
         period = {"camera": 2.0, "thermostat": 30.0, "smart_plug": 60.0, "esp32_sensor": 10.0}
         t = start + timedelta(seconds=rng.uniform(0, period[dev.profile]))
         last_dns = last_ping = last_cloud = start
+        # Benign MQTT reconnects (keep-alive timeouts, Wi-Fi roaming) every 20-40 min;
+        # ~5% fail auth once (e.g. a token refresh race) and are retried. Real devices
+        # do this, and it gives the Isolation Forest variance on connect/failure
+        # features, which it cannot split on if they are constant in training.
+        mqtt_device = dev.profile in {"thermostat", "smart_plug", "esp32_sensor"}
+        next_reconnect = start + timedelta(minutes=rng.uniform(20, 40))
         while t < end:
+            if mqtt_device and t >= next_reconnect:
+                next_reconnect = t + timedelta(minutes=rng.uniform(20, 40))
+                if rng.random() < 0.05:
+                    yield self._ev(
+                        dev,
+                        t,
+                        dst_ip=BROKER,
+                        dst_port=8883,
+                        proto="mqtt",
+                        bytes=120,
+                        ok=False,
+                        mqtt=MqttInfo(packet="CONNECT", client_id=dev.name),
+                    )
+                yield self._ev(
+                    dev,
+                    t,
+                    dst_ip=BROKER,
+                    dst_port=8883,
+                    proto="mqtt",
+                    bytes=120,
+                    ok=True,
+                    mqtt=MqttInfo(packet="CONNECT", client_id=dev.name),
+                )
             if dev.profile == "camera":
                 yield self._ev(
                     dev, t, dst_ip=NVR, dst_port=554, proto="rtsp", bytes=int(rng.gauss(1200, 120))

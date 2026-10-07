@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 
 FLEET_KEY = "__fleet__"
 SEVERITY_SCORE = {"low": 0.3, "medium": 0.5, "high": 0.8, "critical": 1.0}
+HISTORY = 120  # windows kept per device in memory (2 h at 60 s windows)
 
 
 class WindowResult(BaseModel):
@@ -49,6 +50,8 @@ class WindowResult(BaseModel):
     anomaly: AnomalyResult
     rule_hits: list[RuleHit]
     learned: bool
+    # Distinct destinations contacted (IPs and DNS names), for IOC correlation.
+    destinations: list[str] = []
 
 
 def _floor(ts: datetime, seconds: int) -> datetime:
@@ -77,6 +80,8 @@ class BehaviorPipeline:
         self._window_start: dict[str, datetime] = {}
         self._baselines: dict[str, Baseline] = {}
         self.latest: dict[str, WindowResult] = {}
+        # Bounded per-device history (risk lookback: IOC contacts, worst window).
+        self.history: dict[str, deque[WindowResult]] = defaultdict(lambda: deque(maxlen=HISTORY))
         self._load_baselines()
 
     # --- baselines -------------------------------------------------------------------
@@ -126,6 +131,10 @@ class BehaviorPipeline:
         with self._lock:
             return self._advance(now)
 
+    def recent_windows(self, node_id: str, since: datetime) -> list[WindowResult]:
+        with self._lock:
+            return [w for w in self.history.get(node_id, ()) if w.window_end > since]
+
     def flush(self) -> list[WindowResult]:
         with self._lock:
             far = max(self._window_start.values(), default=datetime.now(UTC))
@@ -133,7 +142,7 @@ class BehaviorPipeline:
 
     def _advance(self, now: datetime) -> list[WindowResult]:
         width = timedelta(seconds=self.cfg.window_seconds)
-        results: list[WindowResult] = []
+        closing: list[tuple[str, datetime, datetime, list[TrafficEvent]]] = []
         for node_id in sorted(self._window_start):
             start = self._window_start[node_id]
             if now < start + width:
@@ -143,33 +152,59 @@ class BehaviorPipeline:
             in_window = [e for e in buf if e.ts < end]
             self._buffers[node_id] = [e for e in buf if e.ts >= end]
             if in_window:
-                results.append(self._close(node_id, start, end, in_window))
+                closing.append((node_id, start, end, in_window))
             remaining = self._buffers[node_id]
             if remaining:
                 self._window_start[node_id] = _floor(remaining[0].ts, self.cfg.window_seconds)
             else:
                 del self._window_start[node_id]
-        if results:
-            with self.sessions.begin() as session:
-                self._persist(session, results)
+        if not closing:
+            return []
+        # Features first, then one batched Isolation Forest call (it doesn't depend on
+        # baselines), then baseline z-scores, rules and learning in order.
+        prepared = [(c, *self._features(c[0], c[3])) for c in closing]
+        if_raw = self.scorer.if_scores([vector for _, vector, _ in prepared])
+        results = [
+            self._close(node_id, start, end, events, vector, protocols, raw)
+            for ((node_id, start, end, events), vector, protocols), raw in zip(
+                prepared, if_raw, strict=True
+            )
+        ]
+        with self.sessions.begin() as session:
+            emitted = self._persist(session, results)
+        # Publish only after commit, so subscribers (e.g. the risk engine)
+        # reading detections in their own session see these rows.
+        for node_id, payload in emitted:
+            ts = datetime.fromisoformat(payload["window_end"])
+            self.bus.emit("ANOMALY_DETECTED", node_id, ts=ts, **payload)
         return results
 
     # --- scoring ---------------------------------------------------------------------
 
-    def _close(
-        self, node_id: str, start: datetime, end: datetime, events: list[TrafficEvent]
-    ) -> WindowResult:
+    def _features(self, node_id: str, events: list[TrafficEvent]) -> tuple[Vector, set[str]]:
         device = self.baseline(node_id)
-        fleet = self.baseline(FLEET_KEY)
         mature = device.windows >= self.cfg.baseline.min_windows
-        vector, protocols = compute(
+        return compute(
             events,
             self.cfg.window_seconds,
             self.cfg.mqtt.restricted_topics,
             known_protocols=device.protocols if mature else None,
         )
+
+    def _close(
+        self,
+        node_id: str,
+        start: datetime,
+        end: datetime,
+        events: list[TrafficEvent],
+        vector: Vector,
+        protocols: set[str],
+        if_raw: float | None,
+    ) -> WindowResult:
+        device = self.baseline(node_id)
+        fleet = self.baseline(FLEET_KEY)
         view = choose(device, fleet, vector, self.cfg.baseline, len(events))
-        anomaly = self.scorer.score(vector, view)
+        anomaly = self.scorer.score(vector, view, if_raw)
         hits = self.rules.evaluate(vector, view.zscores)
         clean = not anomaly.is_anomaly and not hits
         learned = False
@@ -186,11 +221,15 @@ class BehaviorPipeline:
             anomaly=anomaly,
             rule_hits=hits,
             learned=learned,
+            destinations=_destinations(events),
         )
         self.latest[node_id] = result
+        self.history[node_id].append(result)
         return result
 
-    def _persist(self, session: Session, results: list[WindowResult]) -> None:
+    def _persist(
+        self, session: Session, results: list[WindowResult]
+    ) -> list[tuple[str, dict[str, Any]]]:
         emitted: list[tuple[str, dict[str, Any]]] = []
         for r in results:
             if r.anomaly.is_anomaly:
@@ -257,8 +296,7 @@ class BehaviorPipeline:
             {FLEET_KEY} if any(r.learned for r in results) else set()
         )
         self._save_baselines(session, changed, results[-1].window_end)
-        for node_id, payload in emitted:
-            self.bus.emit("ANOMALY_DETECTED", node_id, **payload)
+        return emitted
 
     @staticmethod
     def _detection(
@@ -311,12 +349,26 @@ class BehaviorPipeline:
         self.bus.emit(
             "ANOMALY_DETECTED",
             node_id,
+            ts=now,
             kind="rule",
             rule_id=rule_id,
             severity=rule.severity,
             techniques=list(rule.techniques),
             summary=summary,
         )
+
+
+MAX_DESTINATIONS = 64
+
+
+def _destinations(events: Sequence[TrafficEvent]) -> list[str]:
+    found: set[str] = set()
+    for ev in events:
+        if ev.dst_ip:
+            found.add(ev.dst_ip)
+        if ev.dns_query:
+            found.add(ev.dns_query.lower())
+    return sorted(found)[:MAX_DESTINATIONS]
 
 
 def training_vectors(cfg: BehaviorConfig, seed: int, hours: int) -> list[Vector]:

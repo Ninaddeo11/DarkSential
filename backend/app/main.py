@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api import devices, feeds, health, intel
+from app.api import devices, feeds, health, intel, risk
 from app.core.config import Settings, get_settings
 from app.core.events import EventBus
 from app.core.health import CheckResult, HealthRegistry
@@ -144,4 +144,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(feeds.router)
     app.include_router(intel.router)
     app.include_router(devices.router)
+    app.include_router(risk.router)
     return app

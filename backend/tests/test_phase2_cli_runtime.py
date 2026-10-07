@@ -24,6 +24,7 @@ def cli_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("DSN_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("DSN_MODELS_DIR", str(tmp_path / "models"))
     monkeypatch.setenv("DSN_IFOREST_AUTOTRAIN", "false")
+    monkeypatch.setenv("DSN_XGB_AUTOTRAIN", "false")
     return tmp_path
 
 

@@ -1,0 +1,46 @@
+# Explainable risk scoring. Validated by app/risk/config.py.
+#
+# score = sum over factors of  weight * value * 100,  each value in [0, 1].
+# Weights must sum to 1.0, so the score is in [0, 100], each factor's
+# contribution is exactly weight * value * 100, and the score is monotonic in
+# every factor.
+
+weights:
+  unknown_device: 0.10      # never-seen / not-yet-trusted device
+  rate_anomaly: 0.20        # floods, scans, brute force, statistical rate outliers
+  protocol_anomaly: 0.10    # new protocols, MQTT wildcard / restricted-topic misuse
+  threat_intel: 0.35        # IOC contact, KEV-listed CVE on device, actor/campaign link
+  vulnerable_service: 0.25  # CVEs matching the device's CPEs (CVSS x match quality)
+
+# Level = highest threshold the score reaches.
+thresholds:
+  low: 0
+  medium: 25
+  high: 50
+  critical: 75
+
+# Recommended action per level. Protected hosts (DSN_PROTECTED_HOSTS) are never
+# recommended for quarantine: they get "alert" instead.
+actions:
+  low: monitor
+  medium: alert
+  high: review_quarantine   # human decision
+  critical: quarantine      # eligible for automatic quarantine (Phase 4)
+
+factors:
+  trust_values: {unknown: 1.0, known: 0.25, approved: 0.0}
+  # Detections older than this don't count toward rate/protocol factors.
+  lookback_minutes: 15
+  rate_rules: [mqtt_connect_flood, network_scan, credential_brute_force, wifi_deauth_flood]
+  protocol_rules: [protocol_drift, mqtt_wildcard_subscription, mqtt_restricted_publish]
+  # A device speaking a never-seen protocol in its latest window (no rule hit).
+  new_protocol_value: 0.3
+  # CPE -> CVE match quality multipliers (see app/graph/cpe.py match kinds).
+  match_quality: {exact: 1.0, range: 0.9, unversioned: 0.6, any-version: 0.4}
+  # Threat-model F1 (intel poisoning): intel backed by a single source whose best
+  # confidence is below min_confidence is capped, so one unverified dark-web
+  # mention cannot by itself drive a device to HIGH/CRITICAL.
+  single_source_cap: 0.5
+  single_source_min_confidence: 0.6
+  # Threats more hops away than this from a device's IOC/CVE are ignored.
+  max_hops: 3

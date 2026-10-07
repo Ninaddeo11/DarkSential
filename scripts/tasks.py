@@ -134,6 +134,20 @@ def demo_phase2() -> None:
     run(["uv", "run", "python", "-m", "app.cli", "demo-phase2"], cwd=BACKEND, env=env)
 
 
+@task
+def demo_phase3() -> None:
+    """Offline explainable-risk demo: intel + devices + attack -> scored, explained decisions."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DSN_")}
+    env["DSN_DEVICE_ID_HMAC_KEY"] = secrets.token_urlsafe(48)
+    run(["uv", "run", "python", "-m", "app.cli", "demo-phase3"], cwd=BACKEND, env=env)
+
+
+@task
+def ablation() -> None:
+    """Regenerate and execute docs/evaluation/ablation.ipynb (+ CSVs and plots)."""
+    run(["uv", "run", "python", "../scripts/build_ablation_notebook.py"], cwd=BACKEND)
+
+
 # --- Linux containers: for hosts that can't load spaCy's compiled extensions -------
 
 DEV_IMAGE = "ghcr.io/astral-sh/uv:0.12.17-python3.13-trixie-slim"

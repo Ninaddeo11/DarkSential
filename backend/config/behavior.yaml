@@ -31,7 +31,7 @@ anomaly:
   weights: {zscore: 0.5, iforest: 0.5}
   threshold: 0.6
   iforest:
-    n_estimators: 200
+    n_estimators: 100     # Liu et al. / scikit-learn default
     seed: 42
     training_hours: 24     # synthetic normal traffic per training device
     training_seed: 7

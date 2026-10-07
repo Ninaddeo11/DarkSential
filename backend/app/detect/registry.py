@@ -241,7 +241,7 @@ class DeviceRegistry:
                     )
                 )
         for type_, payload in events:
-            self._bus.emit(type_, view.node_id, **payload)  # type: ignore[arg-type]
+            self._bus.emit(type_, view.node_id, ts=now, **payload)  # type: ignore[arg-type]
         return view
 
     def _find(
