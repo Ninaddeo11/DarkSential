@@ -8,9 +8,15 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from hypothesis import settings as hypothesis_settings
 
 from app.core.config import REPO_ROOT, Settings, get_settings
 from app.main import create_app
+
+# Property tests check correctness, not speed: per-example deadlines only add
+# flakiness on slower CI runners (e.g. spaCy's first call loading its pipeline).
+hypothesis_settings.register_profile("dsn", deadline=None, print_blob=True)
+hypothesis_settings.load_profile("dsn")
 
 TEST_HMAC_KEY = "test-hmac-key-that-is-definitely-32-bytes-long"
 FIXTURES = REPO_ROOT / "fixtures"
