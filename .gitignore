@@ -24,7 +24,9 @@ build/
 *.db
 *.sqlite
 *.sqlite3
-data/
+# Runtime data (SQLite, caches, models). Anchored: app/*/data/ holds shipped assets.
+/data/
+backend/data/
 
 # Node
 node_modules/
