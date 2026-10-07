@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
 import ipaddress
 import json
-import sys
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -196,13 +196,14 @@ def test_telemetry_consumer() -> None:
 @pytest.fixture
 def provision_mod() -> Any:
     pytest.importorskip("cryptography")
-    sys.path.insert(0, str(ROOT / "scripts"))
-    try:
-        import mqtt_provision
-
-        yield mqtt_provision
-    finally:
-        sys.path.remove(str(ROOT / "scripts"))
+    spec = importlib.util.spec_from_file_location(
+        "mqtt_provision", ROOT / "scripts" / "mqtt_provision.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_provisioning_pki_and_passwords(provision_mod: Any, tmp_path: Path) -> None:

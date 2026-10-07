@@ -74,6 +74,8 @@ services:
       - ../fixtures:/srv/fixtures:ro
       - ./mosquitto/certs/ca.crt:/srv/mqtt-ca.crt:ro
       - mosquitto-log:/srv/mosquitto-log:ro
+    # Read access to the broker log (0640 mosquitto:mosquitto; see entrypoint.sh).
+    group_add: ["1883"]
     networks: [backplane]
     depends_on:
       neo4j:

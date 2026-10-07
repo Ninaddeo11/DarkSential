@@ -118,7 +118,8 @@ jobs:
       - name: start mosquitto
         run: |
           M="$GITHUB_WORKSPACE/infra/mosquitto"; W="$PWD/data/mqtt-it"
-          docker run -d --name mosq -p 8883:8883 --entrypoint /bin/sh \
+          # LOG_READER_GID: let the (non-root) runner read the broker log.
+          docker run -d --name mosq -p 8883:8883 --entrypoint /bin/sh -e LOG_READER_GID="$(id -g)" \
             -v "$M/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
             -v "$M/entrypoint.sh:/entrypoint.sh:ro" -v "$M/config/acl:/mosquitto/src/acl:ro" \
             -v "$W/passwd:/mosquitto/src/passwd:ro" -v "$W/certs:/mosquitto/src/certs:ro" \
