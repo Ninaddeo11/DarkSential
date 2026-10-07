@@ -27,6 +27,7 @@ lab = [
     "neo4j==6.3.1",
     "numpy==2.4.6 ; python_full_version < '3.12'",
     "numpy==2.5.3 ; python_full_version >= '3.12'",
+    "paho-mqtt==2.1.0",
     "python-nmap==0.7.1",
     "scapy==2.8.0",
     "scikit-learn==1.9.1",
@@ -120,7 +121,10 @@ filterwarnings = [
     # shap (third party) triggers this matplotlib notice at import time.
     "ignore:The set_bad function will be deprecated:PendingDeprecationWarning",
 ]
-markers = ["neo4j: needs a Neo4j server (DSN_TEST_NEO4J_URI)"]
+markers = [
+    "neo4j: needs a Neo4j server (DSN_TEST_NEO4J_URI)",
+    "nft: needs real nftables + CAP_NET_ADMIN (DSN_TEST_NFT=1)",
+]
 
 [tool.coverage.run]
 source = ["app"]

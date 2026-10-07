@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api import devices, feeds, health, intel, risk
+from app.api import devices, feeds, health, intel, response, risk
 from app.core.config import Settings, get_settings
 from app.core.events import EventBus
 from app.core.health import CheckResult, HealthRegistry
@@ -54,13 +54,24 @@ def _register_health_checks(app: FastAPI, settings: Settings) -> None:
         result: CheckResult = await runtime.check_graph()
         return result
 
+    async def response() -> CheckResult:
+        runtime = getattr(app.state, "runtime", None)
+        if runtime is None:
+            return CheckResult(status="not_configured", detail="no enforcement in hosted mode")
+        result: CheckResult = await runtime.check_response()
+        return result
+
+    async def mqtt() -> CheckResult:
+        runtime = getattr(app.state, "runtime", None)
+        if runtime is None:
+            return CheckResult(status="not_configured", detail="no MQTT in hosted mode")
+        result: CheckResult = await runtime.check_mqtt()
+        return result
+
     registry.register("database", database)
     registry.register("graph", graph)
-    registry.register_static(
-        "mqtt",
-        "not_configured",
-        "MQTT client arrives in Phase 4" if settings.mqtt_host else "DSN_MQTT_HOST unset",
-    )
+    registry.register("response", response)
+    registry.register("mqtt", mqtt)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -145,4 +156,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(intel.router)
     app.include_router(devices.router)
     app.include_router(risk.router)
+    app.include_router(response.router)
     return app

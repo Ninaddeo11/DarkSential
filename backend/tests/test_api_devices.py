@@ -100,6 +100,6 @@ def test_phase1_database_is_stamped_and_upgraded(tmp_path: Path) -> None:
         "risk_decisions",
         "alembic_version",
     } <= tables
-    assert con.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003",)
+    assert con.execute("SELECT version_num FROM alembic_version").fetchone() == ("0004",)
     assert con.execute("SELECT count(*) FROM feed_runs").fetchone() == (1,)  # history kept
     con.close()

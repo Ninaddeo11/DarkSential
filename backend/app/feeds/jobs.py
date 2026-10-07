@@ -18,6 +18,19 @@ log = logging.getLogger(__name__)
 
 _runner: FeedRunner | None = None
 _named: dict[str, Callable[[], object]] = {}
+_recover: Callable[[int], object] | None = None
+
+
+def set_recovery(fn: Callable[[int], object] | None) -> None:
+    global _recover
+    _recover = fn
+
+
+def run_recovery_job(quarantine_id: int) -> None:
+    if _recover is None:
+        log.warning("recovery job fired with no handler", extra={"quarantine_id": quarantine_id})
+        return
+    _recover(quarantine_id)
 
 
 def set_runner(runner: FeedRunner | None) -> None:

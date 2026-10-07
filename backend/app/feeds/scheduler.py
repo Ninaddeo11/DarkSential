@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import Engine
 
@@ -106,6 +107,22 @@ class FeedScheduler:
                 args=[name],
                 replace_existing=True,
             )
+
+    def schedule_once(self, job_id: str, func: str, run_at: datetime, args: list[object]) -> None:
+        """Persistent one-shot job (e.g. quarantine recovery); replaces a same-id job."""
+        self._scheduler.add_job(
+            func,
+            trigger=DateTrigger(run_date=run_at),
+            id=job_id,
+            name=job_id,
+            args=args,
+            replace_existing=True,
+            misfire_grace_time=None,
+        )
+
+    def cancel(self, job_id: str) -> None:
+        if self._scheduler.get_job(job_id) is not None:
+            self._scheduler.remove_job(job_id)
 
     def next_run(self, feed: str) -> datetime | None:
         job = self._scheduler.get_job(feed_job_id(feed))

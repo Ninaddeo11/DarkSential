@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -33,6 +34,10 @@ from app.feeds.scheduler import FeedScheduler
 from app.feeds.status import FeedStatusResponse
 from app.graph.memory import InMemoryGraphStore
 from app.graph.store import GraphStore
+from app.mqtt.commands import NullPublisher, PahoPublisher, Publisher, StatusNodeCommander
+from app.response.audit import AuditLog
+from app.response.drivers import DriverError, DryRunDriver, ResponseDriver, build_driver
+from app.response.service import ResponseService
 from app.risk.config import load_risk_config
 from app.risk.engine import RiskEngine
 from app.risk.ml import XgbModel
@@ -40,6 +45,34 @@ from app.risk.ml import XgbModel
 log = logging.getLogger(__name__)
 
 TRUST_REFRESH_SECONDS = 3600
+RESPONSE_SWEEP_SECONDS = 60
+RISK_RESCORE_SECONDS = 900
+
+
+def _build_driver(settings: Settings) -> tuple[ResponseDriver, str | None]:
+    """Requested driver, or dry-run with an error surfaced in readiness (fail safe)."""
+    try:
+        return build_driver(settings.response_driver, settings.dry_run), None
+    except DriverError as exc:
+        log.error(
+            "enforcement driver unavailable: falling back to dry-run",
+            extra={"driver": settings.response_driver, "error": str(exc)},
+        )
+        return DryRunDriver(), f"{settings.response_driver} unavailable ({exc}); using dry-run"
+
+
+def _build_publisher(settings: Settings, on_ack: Callable[[bytes], None]) -> Publisher:
+    if not settings.mqtt_host or not settings.mqtt_username or not settings.mqtt_password:
+        return NullPublisher()
+    return PahoPublisher(
+        settings.mqtt_host,
+        settings.mqtt_port,
+        settings.mqtt_username,
+        settings.mqtt_password.get_secret_value(),
+        tls=settings.mqtt_tls,
+        ca_file=settings.mqtt_ca_file,
+        on_ack=on_ack,
+    )
 
 
 def build_graph_store(settings: Settings) -> GraphStore:
@@ -116,6 +149,10 @@ class LabRuntime:
     pipeline: BehaviorPipeline
     behavior_cfg: BehaviorConfig
     risk: RiskEngine
+    response: ResponseService
+    audit: AuditLog
+    publisher: Publisher
+    response_error: str | None = None
     _services: list[Any] = field(default_factory=list)
 
     @classmethod
@@ -151,8 +188,26 @@ class LabRuntime:
             ml=load_or_train_xgb(settings, behavior_cfg),
         )
         bus.subscribe(risk.on_event)
+        audit = AuditLog(sessions)
+        driver, response_error = _build_driver(settings)
+        holder: dict[str, ResponseService] = {}
+        publisher = _build_publisher(settings, lambda raw: holder["svc"].on_ack(raw))
+        key = (
+            settings.mqtt_command_key.get_secret_value().encode()
+            if settings.mqtt_command_key
+            else None
+        )
+        response = ResponseService(
+            settings, driver, sessions, registry, bus, audit, StatusNodeCommander(publisher, key)
+        )
+        holder["svc"] = response
+        bus.subscribe(response.on_event)
         caps = capabilities.report(settings)
-        named = {"trust_refresh": TRUST_REFRESH_SECONDS}
+        named = {
+            "trust_refresh": TRUST_REFRESH_SECONDS,
+            "response_sweep": RESPONSE_SWEEP_SECONDS,
+            "risk_rescore": RISK_RESCORE_SECONDS,
+        }
         if caps["nmap"].active:
             named["nmap_discovery"] = settings.nmap_interval_minutes * 60
         scheduler = (
@@ -171,8 +226,18 @@ class LabRuntime:
             pipeline,
             behavior_cfg,
             risk,
+            response,
+            audit,
+            publisher,
+            response_error,
         )
         runner.on_success.append(rt._on_feed_success)
+        if scheduler is not None:
+            sched = scheduler
+            response.schedule_recovery = lambda qid, at: sched.schedule_once(
+                f"recover:{qid}", "app.feeds.jobs:run_recovery_job", at, [qid]
+            )
+            response.cancel_recovery = lambda qid: sched.cancel(f"recover:{qid}")
         return rt
 
     @property
@@ -191,6 +256,19 @@ class LabRuntime:
         jobs.set_runner(self.runner)
         jobs.register("trust_refresh", self.registry.refresh_trust)
         jobs.register("nmap_discovery", self.run_nmap)
+        jobs.register("response_sweep", self.response.expire_due)
+        jobs.register("risk_rescore", self.rescore_all)
+        jobs.set_recovery(
+            lambda qid: self.response.release(
+                qid, actor="system:auto-recovery", reason="quarantine expired"
+            )
+        )
+        try:
+            diff = self.response.reconcile()
+            log.info("firewall reconciled", extra=diff)
+        except Exception as exc:
+            self.response_error = f"reconcile failed: {type(exc).__name__}"
+            log.error("firewall reconciliation failed", extra={"error": str(exc)})
         self._start_discovery()
         if self.scheduler:
             self.scheduler.start()
@@ -204,7 +282,9 @@ class LabRuntime:
         if self.scheduler:
             self.scheduler.shutdown()
         jobs.set_runner(None)
+        jobs.set_recovery(None)
         jobs.clear_named()
+        self.publisher.close()
         self.graph.close()
         self.engine.dispose()
 
@@ -252,6 +332,14 @@ class LabRuntime:
             self.registry.observe(obs)
         return len(result.observations)
 
+    def rescore_all(self) -> int:
+        """Periodic re-assessment, so quiet devices don't keep a stale score."""
+        count = 0
+        for device in self.registry.list():
+            if self.risk.assess(device.node_id, trigger="periodic"):
+                count += 1
+        return count
+
     def link_rules(self) -> dict[str, list[str]]:
         """Map each rule to its ATT&CK techniques in the graph; returns missing IDs."""
         missing = {
@@ -287,6 +375,22 @@ class LabRuntime:
 
         await asyncio.to_thread(probe)
         return CheckResult(status="ok")
+
+    async def check_response(self) -> CheckResult:
+        active = len(self.response.list(status="active"))
+        detail = f"driver={self.response.driver.name}, active_quarantines={active}"
+        if self.response_error:
+            return CheckResult(status="error", detail=f"{self.response_error}; {detail}")
+        return CheckResult(status="ok", detail=detail)
+
+    async def check_mqtt(self) -> CheckResult:
+        if isinstance(self.publisher, NullPublisher):
+            return CheckResult(status="not_configured", detail="DSN_MQTT_HOST unset")
+        connected = bool(getattr(self.publisher, "connected", lambda: False)())
+        return CheckResult(
+            status="ok" if connected else "degraded",
+            detail="connected" if connected else "connecting",
+        )
 
     async def check_graph(self) -> CheckResult:
         await asyncio.to_thread(self.graph.ping)

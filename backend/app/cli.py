@@ -16,6 +16,10 @@ rules                    list detection rules and their ATT&CK links
 demo-phase2              offline devices + behavior demo (nmap fixture + simulated attacks)
 risk NODE_ID             assess and explain one device now
 demo-phase3              offline explainable-risk demo
+quarantine NODE_ID [MIN]  quarantine a device (DRY_RUN: planned only)
+release NODE_ID          release a device's active quarantine
+audit [--verify]         show / verify the hash-chained audit log
+demo-phase4              offline quarantine / recovery demo
 """
 
 from __future__ import annotations
@@ -29,6 +33,8 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from pydantic import SecretStr
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
@@ -320,6 +326,127 @@ def demo_phase3(settings: Settings) -> None:
         rt.stop()
 
 
+def demo_phase4(settings: Settings) -> None:
+    import yaml
+
+    from app.behavior.events import TrafficEvent
+    from app.core.config import BACKEND_ROOT
+    from app.detect.observations import Observation
+    from app.mqtt.commands import COMMAND_TOPIC, NullPublisher
+    from app.response.drivers import DryRunDriver
+    from app.response.service import QuarantineRefused
+    from app.simulation.traffic import TrafficSimulator
+
+    tmp = Path(tempfile.mkdtemp(prefix="dsn-demo4-"))
+    risk_cfg = yaml.safe_load((BACKEND_ROOT / "config" / "risk.yaml").read_text(encoding="utf-8"))
+    risk_cfg["thresholds"] = {"low": 0, "medium": 20, "high": 30, "critical": 40}
+    (tmp / "risk.yaml").write_text(yaml.safe_dump(risk_cfg), encoding="utf-8")
+    settings = settings.model_copy(
+        update={
+            "offline_mode": True,
+            "database_url": "sqlite://",
+            "scheduler_enabled": False,
+            "iforest_autotrain": False,
+            "xgb_autotrain": False,
+            "protected_hosts": [ipaddress.ip_address("192.168.50.1")],
+            "risk_config_path": tmp / "risk.yaml",
+            "quarantine_minutes": 10,
+            "mqtt_command_key": SecretStr("demo-status-node-key-0123456789abcdef"),
+            "models_dir": tmp / "models",
+        }
+    )
+    rt = _runtime(settings)
+    try:
+        t0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+        print(
+            f"== Enforcement driver: {rt.response.driver.name} "
+            f"(DRY_RUN={settings.dry_run}; nothing touches the network)"
+        )
+        print(f"   reconcile at startup: {rt.response.reconcile(now=t0)}")
+        rt.runner.run("feodo")
+        gw = rt.registry.observe(
+            Observation(source="arp", ts=t0, mac="50:c7:bf:00:00:01", ip="192.168.50.1")
+        )
+
+        print("\n== 1. Manual quarantine of the gateway is refused (protected host)")
+        try:
+            rt.response.quarantine(gw.node_id if gw else "", "test", actor="cli", now=t0)
+        except QuarantineRefused as exc:
+            print(f"   refused: {exc.reason}")
+
+        print(
+            "\n== 2. esp32-node floods MQTT and contacts a Feodo C2 -> CRITICAL -> auto quarantine"
+        )
+        sim = TrafficSimulator(seed=11)
+        esp = sim.device("esp32-node")
+        events = [le.event for le in sim.mqtt_flood(esp, t0, minutes=1)]
+        events.append(
+            TrafficEvent(
+                ts=t0 + timedelta(seconds=20),
+                src_mac=esp.mac,
+                src_ip=esp.ip,
+                dst_ip="162.243.103.246",
+                dst_port=8080,
+                proto="tcp",
+            )
+        )
+        rt.pipeline.ingest(events)
+        rt.pipeline.flush()
+        for q in rt.response.list(status="active"):
+            print(
+                f"   quarantine #{q['id']}: {q['ip']} by {q['actor']} until "
+                f"{q['expires_at']:%H:%M} UTC; reason: {q['reason']}"
+            )
+        driver = rt.response.driver
+        if isinstance(driver, DryRunDriver):
+            for line in driver.planned[-1:]:
+                print(f"   {line}")
+
+        print("\n== 3. Drift: the element vanished from the firewall; reconcile restores it")
+        if esp.ip in driver.active():
+            driver.release(esp.ip)
+        diff = rt.response.reconcile(now=t0 + timedelta(minutes=1))
+        print(f"   added back: {diff['added']}; in sync: {diff['in_sync']}")
+
+        print("\n== 4. Expiry -> automatic recovery")
+        released = rt.response.expire_due(t0 + timedelta(minutes=11))
+        print(f"   released {released} quarantine(s); firewall now: {sorted(driver.active())}")
+
+        pub = rt.response.commander.publisher
+        if isinstance(pub, NullPublisher):
+            cmds = [json.loads(p) for topic, p in pub.sent if topic == COMMAND_TOPIC]
+            print(
+                "\n== Status-node MQTT commands (HMAC-signed):", ", ".join(c["cmd"] for c in cmds)
+            )
+            print(
+                f"   e.g. {{'cmd': '{cmds[0]['cmd']}', 'node_id': '{cmds[0]['node_id']}', "
+                f"'sig': '{cmds[0]['sig'][:16]}...'}}"
+            )
+
+        print("\n== Audit log (hash-chained, newest first)")
+        for entry in rt.audit.entries(limit=8):
+            print(
+                f"   #{entry['id']:<3}{entry['actor']:<22}{entry['action']:<12}"
+                f"{entry['outcome']:<9}{entry['hash'][:12]}"
+            )
+        chain = rt.audit.verify_chain()
+        print(
+            f"   chain verified: ok={chain.ok}, entries={chain.entries}, head={chain.head[:16]}..."
+        )
+        seen = Counter(e.type for e in rt.bus.recent(limit=5000))
+        print(
+            "\n  events:",
+            {
+                k: v
+                for k, v in sorted(seen.items())
+                if k.startswith(("QUARANTINE", "RECOVERY", "DEVICE_RESTORED"))
+            },
+        )
+        print("\nPhase 4 demo OK")
+    finally:
+        rt.stop()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -346,6 +473,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("rules")
     sub.add_parser("demo-phase2")
     sub.add_parser("demo-phase3")
+    sub.add_parser("demo-phase4")
+    quar = sub.add_parser("quarantine")
+    quar.add_argument("node_id")
+    quar.add_argument("minutes", nargs="?", type=int)
+    rel = sub.add_parser("release")
+    rel.add_argument("node_id")
+    aud = sub.add_parser("audit")
+    aud.add_argument("--verify", action="store_true")
     risk_p = sub.add_parser("risk")
     risk_p.add_argument("node_id")
     args = parser.parse_args(argv)
@@ -363,6 +498,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "demo-phase3":
         demo_phase3(settings)
+        return 0
+    if args.cmd == "demo-phase4":
+        demo_phase4(settings)
         return 0
     if args.cmd == "scan":
         from app.detect.nmap_scan import scan
@@ -403,6 +541,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"unknown device {args.node_id}", file=sys.stderr)
                 return 1
             _dump(decision.model_dump(mode="json"))
+        elif args.cmd == "quarantine":
+            # The firewall table must exist before elements are added (fresh host).
+            rt.response.reconcile()
+            _dump(
+                rt.response.quarantine(
+                    args.node_id, "manual (cli)", actor="cli", minutes=args.minutes
+                )
+            )
+        elif args.cmd == "release":
+            rt.response.reconcile()
+            _dump(rt.response.release_node(args.node_id, actor="cli", reason="manual (cli)"))
+        elif args.cmd == "audit":
+            _dump(rt.audit.verify_chain().model_dump() if args.verify else rt.audit.entries(50))
         elif args.cmd == "devices":
             _dump([d.model_dump() for d in rt.registry.list()])
         elif args.cmd == "approve":

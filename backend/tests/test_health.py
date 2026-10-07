@@ -60,7 +60,11 @@ def test_readiness_flags_enforcing_mode(make_settings: SettingsFactory) -> None:
     with TestClient(create_app(settings)) as c:
         checks = c.get("/api/health/ready").json()["checks"]
     assert checks["config"]["detail"] == "enforcement=ENFORCING, deployment=lab"
-    assert "Phase 4" in checks["mqtt"]["detail"]
+    # MQTT configured: the real client connects in the background (no broker here).
+    assert checks["mqtt"]["status"] == "degraded"
+    assert checks["mqtt"]["detail"] == "connecting"
+    # DRY_RUN off but no nft binary on the test host: fail-safe fallback, surfaced.
+    assert checks["response"]["status"] in {"ok", "error"}
 
 
 def test_readiness_503_when_a_check_errors(client: TestClient) -> None:

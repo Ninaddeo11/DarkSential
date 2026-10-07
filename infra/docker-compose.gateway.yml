@@ -1,0 +1,32 @@
+# Gateway override: REAL enforcement and capture. Use only on the lab gateway host
+# you own, after testing in DRY_RUN:
+#
+#   docker compose --env-file .env -f infra/docker-compose.yml \
+#                  -f infra/docker-compose.gateway.yml up -d
+#
+# What changes vs. the base stack (all deliberate, all risky):
+# * network_mode: host  -> nftables rules land in the HOST's network namespace,
+#   where they filter forwarded lab traffic. The API then binds to the host's
+#   DSN_API_HOST (keep 127.0.0.1, or put a reverse proxy with TLS in front).
+# * cap_add NET_ADMIN (firewall) and NET_RAW (passive capture). Nothing else.
+# * DSN_DRY_RUN must be set to false in .env, and DSN_ADMIN_TOKEN set if you
+#   want manual control. Protected hosts (gateway/broker/admin) must be listed
+#   in DSN_PROTECTED_HOSTS before enabling this.
+#
+# The image needs the nft binary for the nftables driver; it is installed by
+# infra/gateway.Dockerfile.
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../infra/gateway.Dockerfile
+    network_mode: host
+    ports: !reset []
+    networks: !reset []
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DSN_RESPONSE_DRIVER: nftables
+      # Broker and graph are reached via their published localhost ports.
+      DSN_NEO4J_URI: bolt://127.0.0.1:${DSN_NEO4J_BOLT_HOST_PORT:-7687}

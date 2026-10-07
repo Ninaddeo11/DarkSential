@@ -80,6 +80,23 @@ jobs:
           cp .env.example .env
           docker compose --env-file .env -f infra/docker-compose.yml config --quiet
 
+  enforcement:
+    # Driver tests against REAL nftables, in a container with only CAP_NET_ADMIN.
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/astral-sh/uv:0.12.17-python3.13-trixie-slim
+      options: --cap-add=NET_ADMIN
+    env:
+      DSN_TEST_NFT: "1"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - run: apt-get update -qq && apt-get install -y -qq nftables
+      - run: uv sync --frozen --all-extras
+      - run: uv run pytest -q -p no:cacheprovider tests/test_response_drivers.py
+
   demo:
     runs-on: ubuntu-latest
     needs: backend
@@ -95,3 +112,4 @@ jobs:
       - run: make demo-phase1
       - run: make demo-phase2
       - run: make demo-phase3
+      - run: make demo-phase4

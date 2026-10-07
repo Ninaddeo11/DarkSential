@@ -143,6 +143,14 @@ def demo_phase3() -> None:
 
 
 @task
+def demo_phase4() -> None:
+    """Offline quarantine/recovery demo (dry-run driver, signed MQTT, audit chain)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DSN_")}
+    env["DSN_DEVICE_ID_HMAC_KEY"] = secrets.token_urlsafe(48)
+    run(["uv", "run", "python", "-m", "app.cli", "demo-phase4"], cwd=BACKEND, env=env)
+
+
+@task
 def ablation() -> None:
     """Regenerate and execute docs/evaluation/ablation.ipynb (+ CSVs and plots)."""
     run(["uv", "run", "python", "../scripts/build_ablation_notebook.py"], cwd=BACKEND)
@@ -208,6 +216,24 @@ def docker_test() -> None:
         )
     finally:
         subprocess.run(["docker", "rm", "-f", TEST_NEO4J], capture_output=True, check=False)
+
+
+@task
+def docker_test_nft() -> None:
+    """Driver tests against real nftables/iptables (throwaway container, CAP_NET_ADMIN only)."""
+    _require("docker")
+    run(
+        [
+            "docker", "run", "--rm", "--cap-add", "NET_ADMIN",
+            "-v", f"{ROOT}:/repo", "-v", "dsn-venv:/venv", "-v", "dsn-uv-cache:/root/.cache/uv",
+            "-e", "UV_PROJECT_ENVIRONMENT=/venv", "-e", "UV_LINK_MODE=copy",
+            "-e", "DSN_TEST_NFT=1", "-w", "/repo/backend", DEV_IMAGE,
+            "sh", "-c",
+            "apt-get update -qq >/dev/null && apt-get install -y -qq nftables >/dev/null && "
+            "uv sync --frozen --all-extras -q && "
+            "uv run pytest -q -p no:cacheprovider tests/test_response_drivers.py",
+        ]
+    )
 
 
 @task

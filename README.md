@@ -17,7 +17,7 @@ streams everything to a real-time 3D command center.
 | 1 | Threat-intel feeds → STIX 2.1 → Neo4j, NLP | ✅ done |
 | 2 | Device discovery and behavior baselines | ✅ done |
 | 3 | Explainable risk engine | ✅ done |
-| 4 | Quarantine and recovery | ⏳ |
+| 4 | Quarantine and recovery | ✅ done |
 | 5 | Mosquitto TLS/ACL and ESP32 firmware | ⏳ |
 | 6 | Real-time API and 3D command center | ⏳ |
 | 7 | Simulation and evaluation | ⏳ |
@@ -33,6 +33,7 @@ make demo-phase0    # boot the API offline, print health/readiness, shut down
 make demo-phase1    # offline intel demo: 7 feeds -> STIX 2.1 -> graph -> queries + NLP
 make demo-phase2    # devices + behavior: nmap fixture, simulated traffic + attacks -> detections
 make demo-phase3    # explainable risk: scored decisions, contributions, evidence paths, SHAP
+make demo-phase4    # quarantine/recovery: refusal, auto-quarantine, reconcile, audit chain
 make ablation       # re-run the executed ablation notebook (docs/evaluation/)
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
 make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
@@ -154,6 +155,28 @@ cd backend && uv run python -m app.cli risk dev-0123456789abcdef
 
 Read-only API: `GET /api/risk` (all devices, highest first), `/api/risk/{node_id}`
 (latest + history), `/api/risk/model` (weights, thresholds, SHAP importances).
+
+### Quarantine & recovery (Phase 4)
+
+CRITICAL risk triggers an automatic, time-limited quarantine. Manual quarantine,
+release and approval go through the API (bearer `DSN_ADMIN_TOKEN`) or the CLI.
+Every action lands in a hash-chained audit log. Protected hosts are never
+quarantined, and with `DSN_DRY_RUN=true` (the default) the firewall is never
+touched; you just see the exact nft commands.
+
+```bash
+cd backend
+uv run python -m app.cli quarantine dev-0123456789abcdef 30
+uv run python -m app.cli release dev-0123456789abcdef
+uv run python -m app.cli audit --verify
+curl -X POST localhost:8000/api/quarantines -H "Authorization: Bearer $DSN_ADMIN_TOKEN"      -H 'Content-Type: application/json' -d '{"node_id":"dev-…","reason":"manual","minutes":30}'
+```
+
+**Real enforcement** runs on the lab gateway only, after testing in dry-run:
+set `DSN_DRY_RUN=false` and `DSN_PROTECTED_HOSTS`, then
+`docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.gateway.yml up -d`
+(host network, `NET_ADMIN`/`NET_RAW` only, nftables driver). Read the warnings
+in that file first.
 
 ## Configuration
 

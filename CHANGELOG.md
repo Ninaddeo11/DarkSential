@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.0] Phase 4: Response (quarantine & recovery), 2026-10-07
+
+### Added
+- `ResponseDriver` with `NftablesDriver` (own `inet dsn` table, v4/v6 sets,
+  atomic element ops, atomic table replace), `IptablesDriver` (own chain,
+  idempotent) and `DryRunDriver` (records planned commands). DRY_RUN forces
+  dry-run. An unavailable driver falls back to dry-run and readiness reports
+  the error.
+- `ResponseService`: quarantine with duration, reason and evidence;
+  extend-on-repeat; release; expiry sweep; startup reconciliation;
+  protected-host, outside-lab and concurrency-cap refusals (audited and
+  emitted); automatic quarantine at CRITICAL, ALERT at HIGH.
+- Persistent per-quarantine recovery jobs, a 60 s sweep, and a 15 min periodic
+  risk re-score.
+- Hash-chained, append-only audit log with `GET /api/audit/verify`.
+- Signed MQTT commands to the ESP32 status node (HMAC-SHA256, id/ts/ttl) and
+  ack auditing. paho-mqtt v2 client with TLS and reconnect backoff.
+- API: `/api/quarantines` (GET/POST), `/api/quarantines/{id}/release`,
+  `/api/devices/{id}/approve`, `/api/audit`, `/api/audit/verify`. Mutations need
+  `DSN_ADMIN_TOKEN`.
+- CLI: `quarantine`, `release`, `audit`, `demo-phase4`. Tasks:
+  `docker-test-nft`, `demo-phase4`.
+- `infra/docker-compose.gateway.yml` + `infra/gateway.Dockerfile` for real
+  enforcement (host network, NET_ADMIN/NET_RAW only, file capabilities on nft/nmap).
+- CI job `enforcement`: driver tests against real nftables in a NET_ADMIN container.
+
+### Fixed / found during this phase
+- CLI quarantine/release now reconcile first. On a fresh gateway,
+  `nft add element` would fail because the table didn't exist yet.
+
+### Known limitations
+- IP-based quarantine at the gateway: same-segment traffic that bypasses the
+  gateway isn't blocked. The admin token is a single shared secret until
+  Phase 6. The audit chain detects tampering but doesn't prevent it.
+
 ## [0.4.0] Phase 3: Explainable risk engine, 2026-10-07
 
 ### Added

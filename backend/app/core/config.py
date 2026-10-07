@@ -126,6 +126,23 @@ class Settings(BaseSettings):
     wifi_monitor_enabled: bool = False
     wifi_monitor_iface: str | None = None
 
+    # --- Response (Phase 4) -----------------------------------------------------
+    # Which firewall to drive when DRY_RUN is false. DRY_RUN=true always uses the
+    # dry-run driver regardless of this setting.
+    response_driver: Literal["nftables", "iptables", "dryrun"] = "nftables"
+    # Quarantine automatically when the risk engine recommends it (CRITICAL).
+    auto_quarantine: bool = True
+    quarantine_minutes: int = Field(default=30, ge=1, le=7 * 24 * 60)
+    # Threat model E1: refuse to quarantine more devices than this at once.
+    max_active_quarantines: int = Field(default=10, ge=1, le=1000)
+    # Bearer token for mutating API calls (manual quarantine/release/approve).
+    # Unset -> mutations are disabled. Interim until Phase 6 user auth.
+    admin_token: SecretStr | None = None
+    # MQTT client options and the key that signs status-node commands.
+    mqtt_tls: bool = True
+    mqtt_ca_file: str | None = None
+    mqtt_command_key: SecretStr | None = None
+
     # --- Validators ------------------------------------------------------------
     @field_validator("cors_origins", "protected_hosts", mode="before")
     @classmethod
@@ -164,6 +181,13 @@ class Settings(BaseSettings):
         if url is not None and urlparse(url).scheme != "https":
             raise ValueError("darkweb_api_url must use https")
         return url
+
+    @field_validator("admin_token", "mqtt_command_key")
+    @classmethod
+    def _strong_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < MIN_HMAC_KEY_BYTES:
+            raise ValueError(f"must be at least {MIN_HMAC_KEY_BYTES} characters")
+        return value
 
     @field_validator("darkweb_field_map")
     @classmethod

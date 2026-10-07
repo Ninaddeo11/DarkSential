@@ -73,7 +73,7 @@ with mitigations. Status: ✅ in place · ⏳ planned (phase).
 
 | ID | Abuse case | Mitigations |
 |---|---|---|
-| O1 | **Unauthenticated control:** anyone on the LAN calls quarantine/recover. | API bound to 127.0.0.1 by default ✅. Published ports bound to localhost ✅. JWT/OIDC auth plus role check on mutating routes (⏳P6). |
+| O1 | **Unauthenticated control:** anyone on the LAN calls quarantine/recover. | API bound to 127.0.0.1 by default ✅. Published ports bound to localhost ✅. Every mutating endpoint requires a bearer admin token (≥ 32 chars, constant-time compare); without one, mutations are disabled ✅. Never available in hosted mode ✅. Per-user JWT/OIDC + rate limits (⏳P6). |
 | O2 | **CSRF / cross-origin abuse** from a malicious site in the operator's browser. | Explicit CORS allowlist, wildcards rejected, https required in production ✅. Bearer tokens rather than cookie sessions (⏳P6). |
 | O3 | **Clickjacking / content sniffing.** | `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, CSP in nginx ✅. |
 | O4 | **Header injection** via `X-Request-ID`. | Accepted only if it parses as a UUID, otherwise regenerated ✅ (tested). |
@@ -86,10 +86,11 @@ with mitigations. Status: ✅ in place · ⏳ planned (phase).
 
 | ID | Abuse case | Mitigations |
 |---|---|---|
-| E1 | **Self-lockout or mass quarantine** from a bug or poisoned intel. | DRY_RUN=true by default ✅, cannot be disabled in hosted mode ✅, logged loudly when disabled ✅. Protected hosts (⏳P4). Quarantine has a mandatory duration and auto-recovery (⏳P4). Manual override (⏳P4). |
-| E2 | **Firewall state drift** after a crash, leaving devices quarantined forever or released early. | Desired state persisted in DB, reconciled at startup, atomic nft set operations (⏳P4). |
-| E3 | **Privilege creep:** the API process holds `NET_ADMIN`. | API container drops all caps ✅. Enforcement goes to a separate minimal-privilege component (⏳P4). |
-| E4 | **Repudiation:** "who quarantined this?" | Append-only audit log with actor, reason and evidence (⏳P4). |
+| E1 | **Self-lockout or mass quarantine** from a bug or poisoned intel. | DRY_RUN=true by default ✅, cannot be disabled in hosted mode ✅, logged loudly when disabled ✅. Protected hosts (gateway/broker/admin) and the broker IP are refused, as is anything outside `lab_cidr` ✅. Every quarantine has an expiry with auto-recovery (persistent job + 60 s sweep) ✅. Cap of `DSN_MAX_ACTIVE_QUARANTINES` concurrent quarantines ✅. Automatic quarantine only at CRITICAL ✅. Manual release via API/CLI ✅. All tested. |
+| E2 | **Firewall state drift** after a crash, leaving devices quarantined forever or released early. | Desired state persisted in the DB ✅. At startup: release expired, then atomically replace the `inet dsn` table seeded with the desired set ✅ (tested against real nftables). Drift diff is audited ✅. Recovery jobs are persistent, with a sweep fallback ✅. |
+| E3 | **Privilege creep:** the API process holds `NET_ADMIN`. | Base stack: no capabilities, dry-run only ✅. Gateway override: only `NET_ADMIN` + `NET_RAW`, granted as file capabilities to `nft`/`nmap`; the Python process runs as an unprivileged user ✅. Commands are argv lists with validated IPs, no shell ✅. Residual: host networking exposes the API on the host's interfaces if DSN_API_HOST is not loopback. |
+| E4 | **Repudiation:** "who quarantined this?" | Append-only, hash-chained audit log with actor, action, outcome, reason and evidence for every quarantine, release, extension, refusal, reconcile, approval and status-node ack ✅. `GET /api/audit/verify` detects edits and deletions ✅ (tested). Residual: full DB-write access can rewrite the chain, so anchor the head hash externally. |
+| E5 | **Spoofed status-node commands** make the LED show the wrong state, or replayed RECOVER hides a quarantine. | Commands are HMAC-signed with a dedicated key, with id + ts + ttl for replay and staleness checks (firmware, ⏳P5). Broker ACLs restrict who may publish (⏳P5). The LED is informational and never the enforcement point ✅. |
 
 ### Data at rest (TB3)
 

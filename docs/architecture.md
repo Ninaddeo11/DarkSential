@@ -364,6 +364,93 @@ All of this is **simulated** traffic. Phase 7 re-measures on labelled data.
   until the next event (periodic re-scoring is a Phase 4 scheduler job).
 - XGBoost is only as good as its labels: simulated attacks here.
 
+## Phase 4: response (quarantine & recovery)
+
+```
+RISK_UPDATED{action=quarantine} ─┐            ┌── manual: POST /api/quarantines (Bearer DSN_ADMIN_TOKEN), CLI
+                                  ▼            ▼
+                    ResponseService.quarantine(node, reason, minutes, evidence)
+                      refuse (audited + emitted): protected host · outside lab_cidr ·
+                                                  > max_active_quarantines · no IP
+                      QUARANTINE_STARTED → quarantines row (desired state) → driver.quarantine(ip)
+                      → audit (hash chain) → persistent recovery job → MQTT QUARANTINE (signed)
+                      → QUARANTINE_COMPLETED{ok}
+   recovery job / 60 s sweep / manual release:
+                      RECOVERY_STARTED → driver.release(ip) → row released → audit → MQTT RECOVER
+                      → DEVICE_RESTORED
+   startup: reconcile() = release expired + atomic table replace seeded with desired IPs
+```
+
+**Drivers.** `NftablesDriver` (preferred) owns `table inet dsn` with sets
+`quarantine_v4`/`quarantine_v6`, plus forward and input chains that drop in
+both directions. Element add/delete are single atomic commands. `ensure_ready`
+replaces the whole table atomically (add, delete, then define, in one `nft -f`
+transaction), seeded with the desired state, so reconciliation never opens a
+gap. `IptablesDriver` uses a dedicated `DSN-QUARANTINE` chain with
+check-before-add idempotency (two rules per IP, so not atomic). `DryRunDriver`
+records the exact commands it would run. **`DRY_RUN=true` always selects
+dry-run.** A configured driver that is unavailable falls back to dry-run and
+readiness reports `response: error`, failing safe and loudly. All IPs are parsed
+with `ipaddress` before any command is built, and commands are argv lists with
+no shell. Verified against real nftables in a `NET_ADMIN` container (CI job
+`enforcement`).
+
+**State & reconciliation.** The `quarantines` table is the source of truth
+(active / released / failed, expiry, actor, evidence, driver, dry_run). At
+startup and from `reconcile`, expired rows are released first, then the
+firewall is replaced to match the DB. Stray elements (added by hand) are
+removed and missing ones restored. The diff is audited.
+
+**Recovery.** There is a persistent APScheduler date job per quarantine
+(`recover:<id>`), cancelled on manual release. A 60 s sweep (`expire_due`) is
+the safety net if a job is ever lost. Re-quarantining an active device extends
+its expiry instead of duplicating it.
+
+**Policy.** Automatic quarantine happens only when the risk engine's action is
+`quarantine` (CRITICAL) and `DSN_AUTO_QUARANTINE=true`. HIGH sends an ALERT to
+the status node without enforcement. Protected hosts (`DSN_PROTECTED_HOSTS`,
+plus the MQTT broker IP) and IPs outside `lab_cidr` are refused. At most
+`DSN_MAX_ACTIVE_QUARANTINES` (10) are active at once, which guards against mass
+quarantine from poisoned intel (threat model E1). A periodic `risk_rescore` job
+(15 min) re-assesses quiet devices.
+
+**Audit log.** Append-only `audit_log`, where `hash = SHA-256(prev_hash ‖
+canonical JSON(ts, actor, action, node_id, outcome, details))`. Edits,
+deletions and reordering break the chain; `GET /api/audit/verify` reports the
+first bad id. Actors include `system:risk-engine`, `system:auto-recovery`,
+`system:reconcile`, `api:admin`, `cli` and `status-node`.
+
+**MQTT status node.** Commands go to `dsn/cmd/status-node`:
+`{id, ts, cmd, node_id, level, ttl, sig}` with `sig = HMAC-SHA256(DSN_MQTT_COMMAND_KEY,
+canonical JSON)`. The firmware (Phase 5) checks signature, TTL and replay. Acks
+on `dsn/ack/status-node` are audited and never gate enforcement. A broker
+outage never blocks a quarantine. The client is paho-mqtt v2 with TLS
+(certificate and hostname verified), credentials, and reconnect backoff up to
+60 s.
+
+**Deployment.** The base compose backend runs unprivileged on a bridge
+network, so it can only dry-run. Real enforcement uses
+`infra/docker-compose.gateway.yml`: `network_mode: host` so rules land in the
+gateway's namespace, only `NET_ADMIN` + `NET_RAW`, and an image with `nft` and
+`nmap`. Those file capabilities are granted to the binaries; the Python process
+runs as an unprivileged user.
+
+### Known limitations (Phase 4)
+
+- Quarantine is IP-based at the gateway. Traffic between two devices on the
+  same L2 segment that never crosses the gateway isn't blocked; that needs
+  switch ACLs or 802.1X (out of scope). A device that changes IP escapes until
+  rediscovered; the registry follows DHCP changes, and re-quarantine applies to
+  the new IP only on the next assessment.
+- The admin token is a single shared secret. Phase 6 replaces it with per-user
+  auth (JWT/OIDC) and adds rate limits.
+- The hash chain makes tampering detectable, not impossible: someone with full
+  DB write access can rewrite the chain. Export the head hash elsewhere to
+  anchor it.
+- The gateway deployment (host network + capabilities) was validated as
+  configuration and the driver against real nftables, not on a physical
+  gateway in this environment.
+
 ## Key design decisions
 
 - **App factory, no global app.** Tests build isolated apps from explicit
