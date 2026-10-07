@@ -58,12 +58,15 @@ with mitigations. Status: ✅ in place · ⏳ planned (phase).
 
 | ID | Abuse case | Mitigations |
 |---|---|---|
-| D1 | **MAC spoofing** to impersonate an approved device or evade quarantine. | MAC is one signal, not identity. Fingerprint drift and conflicts raise risk (⏳P2–3). Documented limitation. |
-| D2 | **Baseline poisoning:** a device slowly ramps malicious behavior so it becomes "normal". | Bounded baseline update rate, cold-start period, IF retrain on curated windows (⏳P2). |
-| D3 | **Hostile metadata:** mDNS/DHCP hostnames or BLE names carrying script or ANSI payloads. | Treated as untrusted text, length-capped and sanitized before storage and display (⏳P2/P6). |
+| D1 | **MAC spoofing** to impersonate an approved device or evade quarantine. | MAC is one signal, not identity. DHCP/IP reassignment is tracked ✅. Randomized MACs are flagged ✅. Behavior baselines are per device, so an impostor with different behavior scores anomalous ✅. Fingerprint-conflict risk factor (⏳P3). Residual: a spoofer that mimics behavior is not caught. |
+| D2 | **Baseline poisoning:** a device slowly ramps malicious behavior so it becomes "normal". | Windows with an anomaly or rule hit are never learned ✅. Learning stops at `max_windows` ✅. Rules use absolute thresholds that baselines can't shift ✅. The IF trains on curated (simulated) normal data, never on live traffic ✅. Residual: a ramp slower than the z threshold (documented). |
+| D3 | **Hostile metadata:** mDNS/DHCP hostnames, BLE names, nmap banners carrying script or ANSI payloads, or XML bombs. | All device strings are sanitized (NFKC, control/bidi/ANSI stripped) and length-capped on `Observation` ✅. Markup characters stripped from hostnames ✅. nmap XML parsed with defusedxml (entity expansion blocked, tested) ✅. MQTT/pcap parsing is bounds-checked and fuzzed ✅. React escapes at display (⏳P6). |
 | D4 | **MQTT broker abuse:** floods, wildcard subscriptions, publishing to command topics. | No anonymous access ✅ (no client can connect in P0). TLS, per-client ACLs (devices cannot publish to command topics) and rate limits (⏳P5). Flood itself is a detection scenario (⏳P2). |
 | D5 | **Forged ESP32 acks** to fake that a quarantine LED state was shown. | Per-device credentials and ACL-scoped ack topics (⏳P5). Acks are informational and never gate enforcement. |
-| D6 | **Scanning outside the lab** through misconfiguration. | `lab_cidr` must be private and non-loopback ✅. Active scans require DRY_RUN=false and stay within `lab_cidr` (⏳P2). |
+| D6 | **Scanning outside the lab** through misconfiguration. | `lab_cidr` must be private and non-loopback ✅. Every nmap target is checked with `ipaddress.subnet_of(lab_cidr)` ✅. Scan arguments come only from fixed profiles ✅. Active scans need `DSN_NMAP_ENABLED` **and** DRY_RUN=false; otherwise the plan is printed ✅. Wi-Fi monitoring also requires DRY_RUN=false ✅. |
+| D7 | **Malicious ML model file:** a tampered Isolation Forest pickle executes code on load. | The model is HMAC-SHA256 signed with the platform key and verified before unpickling; on mismatch it is rejected and retrained ✅ (tested). The feature-set mismatch check guards against stale models ✅. |
+| D8 | **Rule injection:** a rules.yaml edit or a crafted rule executes code. | Rules are a typed declarative tree (all/any/not/compare), interpreted and never `eval`'d. Unknown features, operators, techniques and extra keys are rejected at load ✅ (tested). The file has the same trust level as config. |
+| D9 | **Capture privileges abused:** packet capture runs with raw-socket rights. | Passive capture, BLE and Wi-Fi monitoring are off by default and capability-checked ✅. Capture is listen-only (no transmit code paths) ✅. In compose, the API container has no capabilities. Capture should run in a separate container with only `NET_RAW` (⏳P4 alongside the enforcement container). |
 
 ### Operator / API layer (TB2)
 

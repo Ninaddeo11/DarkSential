@@ -59,6 +59,9 @@ class FeedRunner:
         self._running: set[str] = set()
         self._lock = threading.Lock()
         self._schema_ready = False
+        # Called with the feed name after each successful run (e.g. re-link
+        # detection rules to ATT&CK once mitre_attack has been ingested).
+        self.on_success: list[Callable[[str], None]] = []
 
     # --- NLP gazetteer from the graph --------------------------------------------------
 
@@ -124,6 +127,12 @@ class FeedRunner:
             with self._lock:
                 self._running.discard(name)
         self._record(result)
+        if result.status == "success":
+            for hook in self.on_success:
+                try:
+                    hook(name)
+                except Exception:
+                    log.exception("feed success hook failed", extra={"feed": name})
         log.info(
             "feed run finished",
             extra={

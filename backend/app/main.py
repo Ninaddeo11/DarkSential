@@ -15,8 +15,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api import feeds, health, intel
+from app.api import devices, feeds, health, intel
 from app.core.config import Settings, get_settings
+from app.core.events import EventBus
 from app.core.health import CheckResult, HealthRegistry
 from app.core.identifiers import DeviceIdHasher
 from app.core.logging import configure_logging
@@ -86,7 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.deployment == "lab":
             from app.runtime import LabRuntime  # lab extra, imported lazily
 
-            runtime = LabRuntime.build(settings, app.state.feeds)
+            runtime = LabRuntime.build(settings, app.state.feeds, bus=app.state.bus)
             runtime.start()
             app.state.runtime = runtime
         try:
@@ -111,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.device_id_hmac_key.get_secret_value().encode("utf-8")
     )
     app.state.feeds = load_feeds_config(settings.feeds_config_path)
+    app.state.bus = EventBus()
     app.state.runtime = None
     app.state.health = HealthRegistry()
     _register_health_checks(app, settings)
@@ -141,4 +143,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(feeds.router)
     app.include_router(intel.router)
+    app.include_router(devices.router)
     return app

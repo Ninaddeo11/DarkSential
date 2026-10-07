@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.3.0] Phase 2: Device detection & behavior, 2026-10-07
+
+### Added
+- **Device registry:** HMAC identities with stable `dev-…` node IDs;
+  provisional IP identities upgraded in place; DHCP reassignment handling; OUI
+  vendor lookup (IEEE MA-L/M/S, 58k prefixes, longest match, randomized-MAC
+  detection); service fingerprint → CPE 2.3 guesses with confidence; trust
+  states with an allowlist (by MAC or HMAC) and approval.
+- **Discovery:** nmap (lab CIDR only, fixed profiles, DRY_RUN prints the plan,
+  defusedxml parsing); passive ARP/DHCP/mDNS (scapy, listen-only); BLE
+  advertisements (bleak, passive); Wi-Fi deauth/disassoc rate per BSSID. Each
+  has a flag and a capability check (`/api/discovery/capabilities`).
+- **Behavior:** 12 per-window features; Welford baselines (log scale,
+  Chan merge) with a cold-start fleet fallback; HMAC-signed Isolation Forest;
+  combined score with top-feature explanations; learning from clean windows only.
+- **Rules:** YAML DSL (typed, never `eval`'d) with 7 rules mapped to ATT&CK,
+  each justified; linked into the graph after every ATT&CK import.
+- pcap → TrafficEvent converter (TCP SYN, plaintext MQTT, refused CONNACK,
+  DNS); seeded traffic simulator with attack injectors.
+- Typed in-process event bus (`DEVICE_CONNECTED`, `DEVICE_PROFILED`,
+  `ANOMALY_DETECTED`, …) with a recent-events API.
+- Alembic migrations (Phase 1 DBs are stamped and upgraded, history kept).
+- API: devices, detections, events, rules, capabilities. CLI: devices, approve,
+  discover-xml, scan, replay, train-model, rules, `demo-phase2`.
+
+### Fixed / found during this phase
+- `.gitignore`'s bare `data/` hid `app/intel/data/tlds.txt` from git, so CI
+  failed on every NLP test (now anchored). CI failures are now annotated per test.
+- ATT&CK for ICS revoked T0855; the restricted-publish rule maps to its
+  replacement T1692.001.
+- False positives: byte variance from 1–2 events was noise, and linear-scale
+  z-scores flagged periodic housekeeping. Fixed with log-scale baselines and a
+  minimum sample size for variance. Measured over 20 seeds: z + IF 0 FP /
+  3,455 normal windows (was 29 FP / 1,724 with z alone on a linear scale).
+- Scans no longer count as authentication failures. DNS replies are no longer
+  counted as requests. mDNS records chained inside list sections are parsed.
+
+### Verification
+- See the docs/architecture.md Phase 2 section for detection measurements
+  (simulated traffic).
+
+### Known limitations
+- Thresholds and the IF are validated on simulated traffic only. BLE identities
+  are weak (rotating addresses). TLS MQTT is opaque in pcaps. Live
+  capture/radio paths are tested with crafted packets and fakes, not hardware.
+
 ## [0.2.0] Phase 1: Threat-intel layer, 2026-10-06
 
 ### Added

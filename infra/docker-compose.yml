@@ -40,10 +40,13 @@ services:
     environment:
       DSN_API_HOST: 0.0.0.0
       DSN_DATABASE_URL: sqlite:////srv/data/dsn.sqlite3
-      DSN_FEEDS_CONFIG_PATH: /srv/config/feeds.yaml
       DSN_FIXTURES_DIR: /srv/fixtures
       DSN_CACHE_DIR: /srv/data/cache
       DSN_NEO4J_URI: bolt://neo4j:7687
+      DSN_MODELS_DIR: /srv/data/models
+      # Discovery (nmap, raw capture) is NOT run in this container: it has no
+      # capabilities and no nmap binary. A dedicated, minimally privileged
+      # capture/enforcement container arrives in Phase 4.
     ports:
       - "127.0.0.1:${DSN_BACKEND_HOST_PORT:-8000}:8000"
     volumes:

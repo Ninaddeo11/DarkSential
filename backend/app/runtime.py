@@ -1,4 +1,4 @@
-"""Lab runtime: DB, graph store, feed runner and scheduler.
+"""Lab runtime: DB, graph, feeds, device registry, behavior pipeline, discovery.
 
 Imported lazily by ``app.main`` only when ``deployment == "lab"``, so hosted
 (serverless) deployments never import the heavy `lab` extra.
@@ -8,14 +8,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.behavior.anomaly import AnomalyScorer, IForestModel, ModelIntegrityError
+from app.behavior.config import BehaviorConfig, load_behavior_config
+from app.behavior.pipeline import BehaviorPipeline, train_model
 from app.core.config import Settings
 from app.core.db import init_db, make_engine, make_session_factory
+from app.core.events import EventBus
 from app.core.health import CheckResult
+from app.core.identifiers import DeviceIdHasher
+from app.detect import capabilities
+from app.detect.registry import DeviceRegistry, load_devices_config, node_id_for
+from app.detect.rules import RuleEngine
 from app.feeds import jobs
 from app.feeds.config import FeedsFile
 from app.feeds.runner import FeedRunner
@@ -25,6 +35,8 @@ from app.graph.memory import InMemoryGraphStore
 from app.graph.store import GraphStore
 
 log = logging.getLogger(__name__)
+
+TRUST_REFRESH_SECONDS = 3600
 
 
 def build_graph_store(settings: Settings) -> GraphStore:
@@ -38,6 +50,29 @@ def build_graph_store(settings: Settings) -> GraphStore:
     return InMemoryGraphStore()
 
 
+def load_or_train_model(settings: Settings, cfg: BehaviorConfig) -> IForestModel | None:
+    key = settings.device_id_hmac_key.get_secret_value().encode("utf-8")
+    try:
+        return IForestModel.load(settings.models_dir, key)
+    except FileNotFoundError:
+        pass
+    except ModelIntegrityError as exc:
+        log.error("Isolation Forest model rejected; retraining", extra={"error": str(exc)})
+    except ImportError as exc:
+        log.warning("Isolation Forest unavailable on this host", extra={"error": str(exc)})
+        return None
+    if not settings.iforest_autotrain:
+        return None
+    try:
+        model = train_model(cfg)
+    except ImportError as exc:
+        log.warning("Isolation Forest unavailable on this host", extra={"error": str(exc)})
+        return None
+    model.save(settings.models_dir, key)
+    log.info("Isolation Forest trained", extra={"samples": model.meta["n_samples"]})
+    return model
+
+
 @dataclass
 class LabRuntime:
     settings: Settings
@@ -46,39 +81,152 @@ class LabRuntime:
     graph: GraphStore
     runner: FeedRunner
     scheduler: FeedScheduler | None
+    bus: EventBus
+    registry: DeviceRegistry
+    rules: RuleEngine
+    pipeline: BehaviorPipeline
+    behavior_cfg: BehaviorConfig
+    _services: list[Any] = field(default_factory=list)
 
     @classmethod
     def build(
-        cls, settings: Settings, feeds: FeedsFile, graph: GraphStore | None = None
+        cls,
+        settings: Settings,
+        feeds: FeedsFile,
+        graph: GraphStore | None = None,
+        bus: EventBus | None = None,
     ) -> LabRuntime:
         engine = make_engine(settings.database_url)
         init_db(engine)
         sessions = make_session_factory(engine)
         graph = graph or build_graph_store(settings)
+        bus = bus or EventBus()
         runner = FeedRunner(settings, feeds, graph, sessions)
-        scheduler = FeedScheduler(engine, feeds) if settings.scheduler_enabled else None
-        return cls(settings, engine, sessions, graph, runner, scheduler)
+        hasher = DeviceIdHasher(settings.device_id_hmac_key.get_secret_value().encode("utf-8"))
+        registry = DeviceRegistry(
+            sessions, hasher, load_devices_config(settings.devices_config_path), bus
+        )
+        behavior_cfg = load_behavior_config(settings.behavior_config_path)
+        rules = RuleEngine.load(settings.rules_config_path)
+        scorer = AnomalyScorer(behavior_cfg.anomaly, load_or_train_model(settings, behavior_cfg))
+        pipeline = BehaviorPipeline(registry, behavior_cfg, rules, scorer, bus, sessions)
+        caps = capabilities.report(settings)
+        named = {"trust_refresh": TRUST_REFRESH_SECONDS}
+        if caps["nmap"].active:
+            named["nmap_discovery"] = settings.nmap_interval_minutes * 60
+        scheduler = (
+            FeedScheduler(engine, feeds, named_jobs=named) if settings.scheduler_enabled else None
+        )
+        rt = cls(
+            settings,
+            engine,
+            sessions,
+            graph,
+            runner,
+            scheduler,
+            bus,
+            registry,
+            rules,
+            pipeline,
+            behavior_cfg,
+        )
+        runner.on_success.append(rt._on_feed_success)
+        return rt
 
     @property
     def graph_backend(self) -> str:
         return "memory" if isinstance(self.graph, InMemoryGraphStore) else "neo4j"
 
+    # --- lifecycle -------------------------------------------------------------------
+
     def start(self) -> None:
         try:
             self.graph.ensure_schema()
+            self.link_rules()
         except Exception as exc:
             # Readiness reports it; ingestion retries schema creation on first run.
             log.error("graph schema setup failed", extra={"error": type(exc).__name__})
         jobs.set_runner(self.runner)
+        jobs.register("trust_refresh", self.registry.refresh_trust)
+        jobs.register("nmap_discovery", self.run_nmap)
+        self._start_discovery()
         if self.scheduler:
             self.scheduler.start()
 
     def stop(self) -> None:
+        for service in self._services:
+            try:
+                service.stop()
+            except Exception:
+                log.exception("discovery service failed to stop")
         if self.scheduler:
             self.scheduler.shutdown()
         jobs.set_runner(None)
+        jobs.clear_named()
         self.graph.close()
         self.engine.dispose()
+
+    def _start_discovery(self) -> None:
+        caps = capabilities.report(self.settings)
+        if caps["passive"].active:
+            from app.detect.passive import PassiveObserver
+
+            svc: Any = PassiveObserver(self.registry.observe, self.settings.passive_capture_iface)
+            svc.start()
+            self._services.append(svc)
+        if caps["ble"].active:
+            from app.detect.ble import BleScanner
+
+            svc = BleScanner(self.registry.observe)
+            svc.start()
+            self._services.append(svc)
+        if caps["wifi"].active and self.settings.wifi_monitor_iface:
+            from app.detect.wifi import DeauthAlert, DeauthMonitor
+
+            def on_alert(alert: DeauthAlert) -> None:
+                self.pipeline.record_alert(
+                    node_id_for(alert.bssid_hmac),
+                    "wifi_deauth_flood",
+                    {
+                        "frames": alert.frames,
+                        "rate_per_min": alert.rate_per_min,
+                        "kinds": alert.kinds,
+                    },
+                    datetime.now(UTC),
+                )
+
+            hasher = DeviceIdHasher(
+                self.settings.device_id_hmac_key.get_secret_value().encode("utf-8")
+            )
+            svc = DeauthMonitor(hasher, on_alert)
+            svc.start(self.settings.wifi_monitor_iface)
+            self._services.append(svc)
+
+    def run_nmap(self) -> int:
+        from app.detect.nmap_scan import scan
+
+        result = scan(self.settings, "service")
+        for obs in result.observations:
+            self.registry.observe(obs)
+        return len(result.observations)
+
+    def link_rules(self) -> dict[str, list[str]]:
+        """Map each rule to its ATT&CK techniques in the graph; returns missing IDs."""
+        missing = {
+            rule.id: self.graph.link_rule(rule.id, rule.techniques, rule.rationale)
+            for rule in self.rules.rules
+        }
+        return {k: v for k, v in missing.items() if v}
+
+    def _on_feed_success(self, feed: str) -> None:
+        if feed == "mitre_attack":
+            missing = self.link_rules()
+            if missing:
+                log.warning(
+                    "rules reference techniques missing from ATT&CK", extra={"missing": missing}
+                )
+
+    # --- views -----------------------------------------------------------------------
 
     def feed_status(self) -> FeedStatusResponse:
         sched = self.scheduler

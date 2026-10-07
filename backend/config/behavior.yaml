@@ -1,0 +1,41 @@
+# Behavior profiling configuration. Validated by app/behavior/config.py.
+
+# Tumbling windows aligned to epoch multiples (deterministic in replay).
+window_seconds: 60
+
+baseline:
+  # A device is "cold" until it has this many clean (non-anomalous) windows; until
+  # then z-scores come from the fleet-wide baseline and are flagged as such.
+  min_windows: 30
+  # The fleet baseline needs at least this many windows before it is used at all.
+  fleet_min_windows: 50
+  # Baselines and z-scores use log1p(feature): z measures ratio changes (see
+  # app/behavior/baseline.py). Effective std = max(std, rel_floor * |mean|, abs_floor),
+  # in log units: abs_floor 0.5 means a change smaller than ~1.65x can never score
+  # z > 1. Stops near-constant features (a sensor publishing exactly every 30 s)
+  # from producing huge z-scores on trivial jitter.
+  rel_floor: 0.1
+  abs_floor: 0.5
+  # Windows with rule hits or anomaly flags are never learned from (threat model
+  # D2: slow baseline poisoning). Learning is also capped: a device's baseline
+  # stops adapting after this many windows unless reset.
+  max_windows: 10080   # one week of 1-minute windows
+
+anomaly:
+  # combined = (w_z * z_component + w_if * if_component) / (weights available)
+  #   z_component  = min(1, max|z| / z_saturation)
+  #   if_component = clamp((s - p50) / (2 * (p99 - p50)), 0, 1), where s is the
+  #                  Isolation Forest anomaly score and p50/p99 come from training
+  #                  data (so p99 of normal traffic maps to 0.5).
+  z_saturation: 6.0
+  weights: {zscore: 0.5, iforest: 0.5}
+  threshold: 0.6
+  iforest:
+    n_estimators: 200
+    seed: 42
+    training_hours: 24     # synthetic normal traffic per training device
+    training_seed: 7
+
+mqtt:
+  # Publishing here from a device is suspicious (command / broker-internal topics).
+  restricted_topics: ["dsn/cmd/#", "$SYS/#"]

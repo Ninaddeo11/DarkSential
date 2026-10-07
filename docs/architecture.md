@@ -186,6 +186,107 @@ runs the Vercel entrypoint, so a leaked import fails CI.
 - **Schema creation uses `create_all`**, with no migrations yet. Alembic is planned
   when the device schema lands (Phase 2).
 
+## Phase 2: device detection & behavior
+
+```
+nmap (lab CIDR only, DRY_RUN → plan) ┐
+passive ARP / DHCP / mDNS (scapy)    ├─► Observation ─► DeviceRegistry ─► devices table
+BLE advertisements (bleak, passive)  │   (sanitized)    HMAC identity, OUI vendor,       │
+traffic sources (pcap / sim / MQTT)  ┘                  services → CPE guesses, trust    ▼
+                                                                          DEVICE_CONNECTED / PROFILED
+TrafficEvent ─► BehaviorPipeline: 60 s tumbling windows (event time)
+   features ─► baseline view (device | fleet | none) ─► AnomalyScorer (z + Isolation Forest)
+            └► RuleEngine (YAML DSL → ATT&CK)       ─► detections table + ANOMALY_DETECTED
+   learn ONLY from clean windows ─► device_baselines table
+Wi-Fi deauth monitor ───────────────────────────────► detection (wifi_deauth_flood)
+```
+
+**Identity.** `node_id = "dev-" + HMAC(key, MAC)[:16]`, stable and safe to show.
+IP-only sightings attach to the device holding that IP, or become a
+provisional `ip` identity that is upgraded in place (same node_id) once a MAC
+is seen. DHCP reassignment moves the IP to the new holder. BLE devices on
+macOS (UUIDs, not MACs) use a namespaced `alt_id`. Randomized (locally
+administered) MACs are flagged and get no vendor.
+
+**Trust.** `approved` (allowlist in `config/devices.yaml`, by MAC or HMAC, or
+`cli approve`) > `known` (present ≥ 24 h) > `unknown`. Trust is input to the
+Phase 3 "unknown device" factor. It is *not* the protected-host allowlist that
+guards enforcement (Phase 4).
+
+**CPE guesses.** nmap's own CPEs (service and OS; 2.2 URIs converted to 2.3 with
+correct escaping, e.g. `%2f` → `\/`) beat a small product table. One guess per
+product, each carrying confidence and basis. Phase 3 feeds them to
+`cves_for_cpe`.
+
+**Features** (per device per window, rates per minute): request_rate,
+unique_destinations, unique_dst_ports, failed_attempts (authentication
+failures only; a refused SYN is not a failed login), proto_entropy,
+bytes_mean, bytes_var, dns_rate, mqtt_connect_rate, mqtt_wildcard_subs,
+mqtt_restricted_publishes, new_protocols.
+
+**Baselines.** Welford (n, mean, M2) per feature, merged with Chan's formula,
+kept on **log1p(x)** so z-scores measure ratio changes. Rates and byte sizes
+are heavy-tailed and periodic; on a linear scale a device's normal 5-minute
+housekeeping call looked like a 4σ outlier. `bytes_var` is ignored below 5
+events per window (a variance from 1–2 samples is noise). Std is floored:
+`max(std, 0.1·|mean|, 0.5)`. Cold start: under 30 clean windows a device is
+scored against the fleet baseline (flagged `cold`); without a mature fleet
+baseline, only the Isolation Forest and the rules apply. Anomalous or
+rule-hit windows are never learned (anti-poisoning), and learning stops at
+`max_windows`.
+
+**Isolation Forest.** Trained on seeded simulated normal traffic (log1p
+features), calibrated with the training-score p50/p99. The joblib file is a
+pickle, so it is **HMAC-signed with the platform key and verified before
+deserialization**. A tampered model is rejected and retrained.
+
+**Combined score** = weighted mean of `min(1, max|z|/6)` and the calibrated IF
+component (weights 0.5/0.5, renormalized when one is missing). Threshold
+0.6. Results carry the top-3 z-score features for explanation.
+
+**Measured (simulator, 20 seeds, 3,455 normal / 140 attack windows):**
+z + IF detected 140/140 attack windows with 0 false positives. z-scores alone
+detected 140/140 with 10 false positives (0.29%). This is synthetic traffic
+only; Phase 7 evaluates on labelled datasets.
+
+**Rules** (`config/rules.yaml`, typed DSL, never `eval`'d; every mapping
+justified in comments and a `rationale` stored on the graph's DetectionRule):
+
+| Rule | Techniques |
+|---|---|
+| mqtt_connect_flood | T1498, T1499 |
+| mqtt_wildcard_subscription | T1040 |
+| mqtt_restricted_publish | T1692.001 (ICS Command Message; replaces revoked T0855) |
+| credential_brute_force | T1110, T1110.001 |
+| network_scan | T1046 |
+| protocol_drift | T1071 |
+| wifi_deauth_flood | T1498, T0814 |
+
+Rules are linked into the graph at startup and again after every ATT&CK
+import, so `techniques_for_behavior(rule_id)` works.
+
+**pcap → events.** One event per *request*: TCP SYNs (port → protocol),
+plaintext MQTT control packets (topics parsed, bounds-checked), refused
+CONNACKs as failed CONNECTs for the client, and DNS queries. Service replies
+are skipped. TLS MQTT (8883) payloads are opaque.
+
+**Schema.** Alembic migrations (`backend/migrations`): 0001 is the Phase 1
+`feed_runs`, 0002 adds devices, detections and device_baselines. Phase 1
+databases (created with `create_all`) are stamped at 0001 and upgraded,
+keeping run history.
+
+### Known limitations (Phase 2)
+
+- Behavior thresholds and the IF were tuned and validated on **simulated**
+  traffic. Real lab traffic needs a calibration period (Phase 7).
+- BLE identities are weak: most devices rotate random addresses.
+- MQTT over TLS cannot be parsed from pcaps. MQTT-specific features need the
+  broker-side telemetry consumer (Phase 5) or plaintext 1883 in the lab.
+- Passive capture, BLE and Wi-Fi monitoring were tested with crafted packets
+  and fakes, not live radios or interfaces in CI.
+- nmap OS CPEs in the fixture are synthetic. Real nmap OS CPEs are often
+  coarser (vendor/product without firmware version).
+
 ## Key design decisions
 
 - **App factory, no global app.** Tests build isolated apps from explicit

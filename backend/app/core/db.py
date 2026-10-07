@@ -58,7 +58,25 @@ def make_session_factory(engine: Engine) -> sessionmaker:  # type: ignore[type-a
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def init_db(engine: Engine) -> None:
-    from app.models import feed_run  # noqa: F401 - register tables
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
-    Base.metadata.create_all(engine)
+
+def init_db(engine: Engine) -> None:
+    """Bring the schema to the latest Alembic revision.
+
+    Phase 1 databases were created with ``create_all`` (feed_runs only, no
+    alembic_version table); those are stamped at revision 0001 so the upgrade
+    adds the newer tables without touching existing run history.
+    """
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
+    with engine.begin() as conn:
+        cfg.attributes["connection"] = conn
+        tables = set(inspect(conn).get_table_names())
+        if "feed_runs" in tables and "alembic_version" not in tables:
+            command.stamp(cfg, "0001")
+        command.upgrade(cfg, "head")

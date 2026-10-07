@@ -21,6 +21,7 @@ lab = [
     "alembic==1.20.0",
     "apscheduler==3.11.3",
     "bleak==3.0.2",
+    "defusedxml==0.7.1",
     "httpx2==2.13.1",
     "joblib==1.6.0",
     "neo4j==6.3.1",
@@ -44,6 +45,7 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-github-actions-annotate-failures==0.4.2",
     "ruff==0.16.10",
+    "types-defusedxml==0.7.0.20260504",
     "types-pyyaml==6.0.12.20260906",
 ]
 
@@ -74,7 +76,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "S311", "S603", "ANN"]  # seeded RNGs; fixed-arg subprocess
+"tests/**" = ["S101", "S104", "S105", "S106", "S311", "S603", "ANN"]  # seeded RNGs, fixed-arg subprocess, 0.0.0.0 literals in packets
+"app/simulation/**" = ["S311"]  # deterministic seeded simulation, not crypto
 
 # --- mypy ---------------------------------------------------------------------
 [tool.mypy]
@@ -88,7 +91,7 @@ files = ["app", "tests", "../api"]
 
 [[tool.mypy.overrides]]
 # Untyped third-party packages.
-module = ["stix2.*", "stix2patterns.*", "apscheduler.*"]
+module = ["stix2.*", "stix2patterns.*", "apscheduler.*", "nmap.*", "sklearn.*", "joblib.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

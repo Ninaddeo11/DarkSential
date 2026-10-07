@@ -126,6 +126,14 @@ def demo_phase1() -> None:
     run(["uv", "run", "python", "-m", "app.cli", "demo-phase1"], cwd=BACKEND, env=env)
 
 
+@task
+def demo_phase2() -> None:
+    """Offline devices + behavior demo: nmap fixture, simulated traffic and attacks."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DSN_")}
+    env["DSN_DEVICE_ID_HMAC_KEY"] = secrets.token_urlsafe(48)
+    run(["uv", "run", "python", "-m", "app.cli", "demo-phase2"], cwd=BACKEND, env=env)
+
+
 # --- Linux containers: for hosts that can't load spaCy's compiled extensions -------
 
 DEV_IMAGE = "ghcr.io/astral-sh/uv:0.12.17-python3.13-trixie-slim"
@@ -194,6 +202,16 @@ def docker_demo_phase1() -> None:
     subprocess.run(["docker", "network", "create", TEST_NET], capture_output=True, check=False)
     _docker_backend(
         "uv run python -m app.cli demo-phase1",
+        {"DSN_DEVICE_ID_HMAC_KEY": secrets.token_urlsafe(48)},
+    )
+
+
+@task
+def docker_demo_phase2() -> None:
+    """demo-phase2 inside a Linux container."""
+    subprocess.run(["docker", "network", "create", TEST_NET], capture_output=True, check=False)
+    _docker_backend(
+        "uv run python -m app.cli demo-phase2",
         {"DSN_DEVICE_ID_HMAC_KEY": secrets.token_urlsafe(48)},
     )
 

@@ -1,0 +1,14 @@
+# Device trust configuration. Validated by app/detect/registry.py.
+#
+# approved: devices that are expected on the lab network. Each entry is either
+#   mac:  AA:BB:CC:DD:EE:FF   (converted to an HMAC at load; never stored raw)
+#   hmac: <64 hex>            (the device's identity_hmac, as shown by the API)
+# An approved device is never "unknown", which removes the unknown-device risk
+# factor in Phase 3. Approval is NOT the protected-host allowlist (Phase 4).
+approved: []
+
+# A device that is not approved becomes "known" after being present this long.
+known_after_hours: 24
+
+# Missing longer than this, a returning device triggers DEVICE_CONNECTED again.
+offline_after_minutes: 30

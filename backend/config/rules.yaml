@@ -1,0 +1,110 @@
+# Behavior detection rules -> MITRE ATT&CK. Validated by app/detect/rules.py.
+#
+# DSL (declarative, never eval'd):
+#   when:
+#     all: [cond, ...] | any: [cond, ...] | not: cond
+#     {feature: <name>, op: ">"|">="|"<"|"<="|"=="|"!=", value: <number>}
+#     {z: <feature>, op: ..., value: <number>}     # z-score vs the device/fleet baseline
+# Features: see app/behavior/features.py. Rates are per minute.
+#
+# Every rule states WHY its techniques apply (rationale is also stored on the
+# rule node in the graph and shown in risk explanations).
+
+rules:
+  - id: mqtt_connect_flood
+    title: MQTT CONNECT flood
+    severity: high
+    techniques: [T1498, T1499]
+    # T1498 Network DoS: hundreds of CONNECTs/min saturate the broker's network and
+    #   session handling for every client.
+    # T1499 Endpoint DoS: each CONNECT costs broker CPU/memory for auth and session
+    #   setup, so the flood exhausts the broker host itself.
+    rationale: >-
+      Sustained MQTT CONNECT rates far above any device's need exhaust broker network
+      capacity (T1498) and per-session CPU/memory (T1499).
+    when:
+      any:
+        - {feature: mqtt_connect_rate, op: ">=", value: 120}
+        - all:
+            - {feature: mqtt_connect_rate, op: ">=", value: 30}
+            - {z: mqtt_connect_rate, op: ">=", value: 6}
+
+  - id: mqtt_wildcard_subscription
+    title: MQTT wildcard subscription
+    severity: medium
+    techniques: [T1040]
+    # T1040 Network Sniffing: subscribing to '#' or '+' receives every message on the
+    #   broker. That is the MQTT equivalent of putting an interface in promiscuous
+    #   mode to collect other devices' data. IoT devices publish to fixed topics and
+    #   have no legitimate need for it.
+    rationale: >-
+      A device subscribing with # or + collects all broker traffic, the MQTT analogue
+      of network sniffing (T1040). Field devices only use fixed topics.
+    when: {feature: mqtt_wildcard_subs, op: ">=", value: 1}
+
+  - id: mqtt_restricted_publish
+    title: Publish to restricted MQTT topic
+    severity: critical
+    techniques: [T1692.001]
+    # T1692.001 Command Message (ATT&CK for ICS; replaces the revoked T0855
+    #   "Unauthorized Command Message"): a device publishing on the command channel
+    #   (dsn/cmd/#) or broker-internal topics ($SYS/#) is sending control messages
+    #   it is not authorized to send.
+    rationale: >-
+      Field devices never publish on command/system topics; doing so is an
+      unauthorized command message (T1692.001, formerly T0855).
+    when: {feature: mqtt_restricted_publishes, op: ">=", value: 1}
+
+  - id: credential_brute_force
+    title: Repeated authentication failures
+    severity: high
+    techniques: [T1110, T1110.001]
+    # T1110 Brute Force / .001 Password Guessing: many failed logins in one window
+    #   (SSH, Telnet, MQTT CONNACK refusals) from one device is password guessing,
+    #   the classic Mirai-style IoT propagation step.
+    rationale: >-
+      Many authentication failures in one minute indicate password guessing
+      (T1110.001), typical of IoT botnet propagation.
+    when: {feature: failed_attempts, op: ">=", value: 10}
+
+  - id: network_scan
+    title: Port / host scanning
+    severity: high
+    techniques: [T1046]
+    # T1046 Network Service Discovery: touching many distinct ports or hosts in a
+    #   minute is service discovery. IoT devices talk to a handful of fixed endpoints.
+    rationale: >-
+      Contacting dozens of distinct ports or hosts per minute is network service
+      discovery (T1046); IoT devices use a few fixed endpoints.
+    when:
+      any:
+        - {feature: unique_dst_ports, op: ">=", value: 25}
+        - {feature: unique_destinations, op: ">=", value: 50}
+
+  - id: protocol_drift
+    title: New protocol for this device
+    severity: low
+    techniques: [T1071]
+    # T1071 Application Layer Protocol: a device suddenly speaking a protocol it has
+    #   never used (once its baseline is mature) is a common sign of a new C2 or
+    #   tunneling channel. Low severity alone; the risk engine combines it with
+    #   other evidence.
+    rationale: >-
+      A mature device speaking a never-seen protocol can indicate a new
+      command-and-control channel over an application protocol (T1071).
+    when:
+      all:
+        - {feature: new_protocols, op: ">=", value: 1}
+        - {z: request_rate, op: ">=", value: 2}
+
+  - id: wifi_deauth_flood
+    title: Wi-Fi deauthentication flood
+    severity: high
+    techniques: [T1498, T0814]
+    # T1498 Network DoS / T0814 Denial of Service (ICS): a burst of forged
+    #   deauth/disassoc frames knocks every client off the AP. Raised by the Wi-Fi
+    #   monitor, not by traffic windows, so it has no `when` condition here.
+    rationale: >-
+      Bursts of deauthentication frames disconnect all clients of an access point,
+      a wireless denial of service (T1498, T0814).
+    source: wifi

@@ -43,7 +43,8 @@ CVES = [
 TECHNIQUES = {
     "T1046", "T1110", "T1110.001", "T1498", "T1499", "T1595", "T1595.001", "T1190",
     "T1071", "T1071.001", "T1557", "T1040", "T1078", "T1105", "T1059.004",
-    "T0814", "T0886", "T0855", "T0846", "T0866",
+    "T0814", "T0886", "T0846", "T0866",
+    "T1692", "T1692.001",  # ICS Command Message (replaced revoked T0855)
 }
 SOFTWARE = {"Emotet", "QakBot", "BlackEnergy", "Industroyer", "VPNFilter", "Mirai", "Cyclops Blink"}
 GROUPS = {"Sandworm Team", "APT28"}
@@ -141,11 +142,17 @@ def build_feodo() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--nvd-api-key")
+    parser.add_argument("--only", choices=["kev", "attack", "feodo", "nvd"], action="append")
     args = parser.parse_args()
-    build_kev()
-    build_attack()
-    build_feodo()
-    build_nvd(args.nvd_api_key)
+    only = set(args.only or ["kev", "attack", "feodo", "nvd"])
+    if "kev" in only:
+        build_kev()
+    if "attack" in only:
+        build_attack()
+    if "feodo" in only:
+        build_feodo()
+    if "nvd" in only:
+        build_nvd(args.nvd_api_key)
     print(f"done at {datetime.now(UTC).isoformat()}")
 
 

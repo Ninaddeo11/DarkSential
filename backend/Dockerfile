@@ -14,6 +14,7 @@ WORKDIR /srv
 COPY --from=build /srv/.venv /srv/.venv
 COPY app ./app
 COPY config ./config
+COPY migrations ./migrations
 ENV PATH="/srv/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN mkdir -p /srv/data && chown dsn:dsn /srv/data
 USER dsn

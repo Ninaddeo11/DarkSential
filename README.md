@@ -14,8 +14,8 @@ streams everything to a real-time 3D command center.
 | Phase | Scope | State |
 |---|---|---|
 | 0 | Scaffold, config, logging, health, CI, architecture and threat model | ✅ done |
-| 1 | Threat-intel feeds → STIX 2.1 → Neo4j, NLP | ✅ done (awaiting review) |
-| 2 | Device discovery and behavior baselines | ⏳ |
+| 1 | Threat-intel feeds → STIX 2.1 → Neo4j, NLP | ✅ done |
+| 2 | Device discovery and behavior baselines | ✅ done |
 | 3 | Explainable risk engine | ⏳ |
 | 4 | Quarantine and recovery | ⏳ |
 | 5 | Mosquitto TLS/ACL and ESP32 firmware | ⏳ |
@@ -31,6 +31,7 @@ Requirements: Python ≥ 3.11, [uv](https://docs.astral.sh/uv/) 0.12+, Node 24, 
 make setup          # install deps (incl. the `lab` extra); creates .env with generated secrets
 make demo-phase0    # boot the API offline, print health/readiness, shut down
 make demo-phase1    # offline intel demo: 7 feeds -> STIX 2.1 -> graph -> queries + NLP
+make demo-phase2    # devices + behavior: nmap fixture, simulated traffic + attacks -> detections
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
 make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
 ```
@@ -109,6 +110,30 @@ because there is no graph there.
 
 `requirements.txt` at the root is generated from `backend/uv.lock`
 (`make export-reqs`), and CI fails if the two drift apart.
+
+### Devices & behavior (Phase 2)
+
+Devices are discovered by nmap, by passive ARP/DHCP/mDNS listening, and from
+BLE advertisements. Each is keyed by `HMAC(key, MAC)`, gets an OUI vendor and
+CPE guesses, and has a trust state (`unknown` → `known` after 24 h, or
+`approved`). Traffic is scored per device per minute: Welford baselines (log
+scale) plus a signed Isolation Forest, and YAML rules mapped to ATT&CK.
+
+Every discovery source is **off by default** and capability-checked. Active nmap
+scans and Wi-Fi monitoring also need `DSN_DRY_RUN=false` (see
+`GET /api/discovery/capabilities`).
+
+```bash
+cd backend
+uv run python -m app.cli scan --profile service          # DRY_RUN: prints the plan
+uv run python -m app.cli discover-xml ../fixtures/events/lab-scan.nmap.xml
+uv run python -m app.cli replay capture.pcap               # or a .jsonl of TrafficEvents
+uv run python -m app.cli devices
+uv run python -m app.cli approve dev-0123456789abcdef
+```
+
+Read-only API: `GET /api/devices`, `/api/devices/{node_id}`, `/api/detections`,
+`/api/events`, `/api/rules`, `/api/discovery/capabilities`.
 
 ## Configuration
 

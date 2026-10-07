@@ -47,6 +47,11 @@ class DeviceIdHasher:
         digest = hmac.new(self._key, normalize_mac(mac).encode("ascii"), hashlib.sha256)
         return digest.hexdigest()
 
+    def keyed(self, namespace: str, value: str) -> str:
+        """HMAC of a namespaced non-MAC identifier (e.g. ``ip:192.168.50.7``)."""
+        material = f"{namespace}:{value}".encode()
+        return hmac.new(self._key, material, hashlib.sha256).hexdigest()
+
     def matches(self, mac: str, device_id: str) -> bool:
         """Constant-time check that ``mac`` maps to ``device_id``."""
         return hmac.compare_digest(self.device_id(mac), device_id)

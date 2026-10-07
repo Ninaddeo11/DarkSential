@@ -16,8 +16,10 @@ from urllib.parse import urlparse
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-BACKEND_ROOT = REPO_ROOT / "backend"
+# BACKEND_ROOT is the directory holding the `app` package: backend/ in the repo,
+# /srv in the container, /var/task/backend on Vercel. Shipped config lives under it.
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_ROOT.parent
 MIN_HMAC_KEY_BYTES = 32
 
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -101,6 +103,25 @@ class Settings(BaseSettings):
             "text": "text",
         }
     )
+
+    # --- Devices & behavior (Phase 2) -------------------------------------------
+    devices_config_path: Path = BACKEND_ROOT / "config" / "devices.yaml"
+    rules_config_path: Path = BACKEND_ROOT / "config" / "rules.yaml"
+    behavior_config_path: Path = BACKEND_ROOT / "config" / "behavior.yaml"
+    models_dir: Path = Path("./data/models")
+    # Train the Isolation Forest at startup when no (valid) model exists.
+    iforest_autotrain: bool = True
+    nmap_interval_minutes: int = Field(default=30, ge=5)
+    # Discovery sources. Each also needs a runtime capability check to start.
+    # Active nmap scans additionally require DSN_DRY_RUN=false.
+    nmap_enabled: bool = False
+    passive_capture_enabled: bool = False
+    passive_capture_iface: str | None = None
+    ble_scan_enabled: bool = False
+    # Wi-Fi management-frame monitoring needs a monitor-mode interface and
+    # DSN_DRY_RUN=false (it is treated like scanning).
+    wifi_monitor_enabled: bool = False
+    wifi_monitor_iface: str | None = None
 
     # --- Validators ------------------------------------------------------------
     @field_validator("cors_origins", "protected_hosts", mode="before")

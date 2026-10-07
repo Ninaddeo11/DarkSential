@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<!-- SYNTHETIC lab scan in nmap's XML output schema (nmap -sV -O -oX -). Hosts match
+     app/simulation/traffic.py's default fleet plus the lab gateway and broker.
+     The gateway's OS CPE is chosen to be KEV-listed (CVE-2023-1389) on purpose. -->
+<nmaprun scanner="nmap" args="nmap -sV -O -n --top-ports 200 -oX - 192.168.50.0/24" start="1790000000" version="7.95" xmloutputversion="1.05">
+  <host starttime="1790000001" endtime="1790000040">
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.50.1" addrtype="ipv4"/>
+    <address addr="50:C7:BF:00:00:01" addrtype="mac" vendor="TP-Link Technologies"/>
+    <hostnames><hostname name="archer-gw" type="PTR"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="53"><state state="open" reason="syn-ack"/><service name="domain" product="dnsmasq" version="2.80" method="probed" conf="10"><cpe>cpe:/a:thekelleys:dnsmasq:2.80</cpe></service></port>
+      <port protocol="tcp" portid="80"><state state="open" reason="syn-ack"/><service name="http" product="TP-LINK router http config" method="probed" conf="10"/></port>
+      <port protocol="tcp" portid="22"><state state="open" reason="syn-ack"/><service name="ssh" product="Dropbear sshd" version="2019.78" method="probed" conf="10"><cpe>cpe:/a:matt_johnston:dropbear_ssh_server:2019.78</cpe></service></port>
+      <port protocol="tcp" portid="8443"><state state="closed" reason="reset"/><service name="https-alt" method="table" conf="3"/></port>
+    </ports>
+    <os><osmatch name="TP-LINK Archer AX21 WAP (firmware 1.1.1)" accuracy="94"><osclass type="WAP" vendor="TP-LINK" osfamily="embedded" accuracy="94"><cpe>cpe:/o:tp-link:archer_ax21_firmware:1.1.1</cpe></osclass></osmatch></os>
+  </host>
+  <host starttime="1790000001" endtime="1790000030">
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.50.2" addrtype="ipv4"/>
+    <address addr="B8:27:EB:00:00:02" addrtype="mac" vendor="Raspberry Pi Foundation"/>
+    <hostnames><hostname name="mqtt-broker" type="PTR"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="8883"><state state="open" reason="syn-ack"/><service name="secure-mqtt" product="Mosquitto" version="2.0.18" tunnel="ssl" method="probed" conf="10"/></port>
+      <port protocol="tcp" portid="22"><state state="open" reason="syn-ack"/><service name="ssh" product="OpenSSH" version="9.2p1 Debian 2+deb12u3" method="probed" conf="10"><cpe>cpe:/a:openbsd:openssh:9.2p1</cpe></service></port>
+    </ports>
+  </host>
+  <host starttime="1790000001" endtime="1790000035">
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.50.21" addrtype="ipv4"/>
+    <address addr="44:19:B6:10:00:01" addrtype="mac" vendor="Hangzhou Hikvision Digital Technology"/>
+    <ports>
+      <port protocol="tcp" portid="80"><state state="open" reason="syn-ack"/><service name="http" product="Hikvision IP camera httpd" method="probed" conf="10"/></port>
+      <port protocol="tcp" portid="554"><state state="open" reason="syn-ack"/><service name="rtsp" product="Hikvision 7513 POE IP camera rtspd" method="probed" conf="10"/></port>
+    </ports>
+    <os><osmatch name="Hikvision DS-2CD2026G2-IU/SL camera" accuracy="90"><osclass type="webcam" vendor="Hikvision" osfamily="embedded" accuracy="90"><cpe>cpe:/o:hikvision:ds-2cd2026g2-iu%2fsl_firmware</cpe></osclass></osmatch></os>
+  </host>
+  <host starttime="1790000001" endtime="1790000020">
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.50.22" addrtype="ipv4"/>
+    <address addr="18:B4:30:20:00:02" addrtype="mac" vendor="Nest Labs"/>
+    <ports><extraports state="closed" count="200"/></ports>
+  </host>
+  <host starttime="1790000001" endtime="1790000025">
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.50.23" addrtype="ipv4"/>
+    <address addr="50:C7:BF:30:00:03" addrtype="mac" vendor="TP-Link Technologies"/>
+    <hostnames><hostname name="plug-desk&lt;script&gt;" type="PTR"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="9999"><state state="open" reason="syn-ack"/><service name="abyss" product="TP-LINK smart plug" method="probed" conf="8"/></port>
+    </ports>
+  </host>
+  <host starttime="1790000001" endtime="1790000022">
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.50.24" addrtype="ipv4"/>
+    <address addr="24:0A:C4:40:00:04" addrtype="mac" vendor="Espressif"/>
+    <ports><extraports state="filtered" count="200"/></ports>
+  </host>
+  <host starttime="1790000001" endtime="1790000002">
+    <status state="down" reason="no-response"/>
+    <address addr="192.168.50.99" addrtype="ipv4"/>
+  </host>
+  <runstats><finished time="1790000041" elapsed="41.2" exit="success"/><hosts up="6" down="1" total="7"/></runstats>
+</nmaprun>

@@ -42,6 +42,18 @@ SPACY = _spacy_loads()
 requires_spacy = pytest.mark.skipif(not SPACY, reason="spaCy cannot load on this host")
 
 
+def _sklearn_loads() -> bool:
+    try:
+        from sklearn.ensemble import IsolationForest  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+SKLEARN = _sklearn_loads()
+requires_sklearn = pytest.mark.skipif(not SKLEARN, reason="scikit-learn cannot load here")
+
+
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Strip any DSN_* variables from the developer's shell so tests are hermetic."""
@@ -64,6 +76,8 @@ def make_settings(tmp_path: Path) -> SettingsFactory:
             "cache_dir": tmp_path / "cache",
             "scheduler_enabled": False,
             "offline_mode": True,
+            "models_dir": tmp_path / "models",
+            "iforest_autotrain": False,
         }
         values.update(overrides)
         return Settings(_env_file=None, **values)

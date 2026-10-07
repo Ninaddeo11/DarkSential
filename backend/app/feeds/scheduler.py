@@ -28,9 +28,18 @@ def feed_job_id(name: str) -> str:
 
 
 class FeedScheduler:
-    def __init__(self, engine: Engine, feeds: FeedsFile, *, jitter_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        feeds: FeedsFile,
+        *,
+        jitter_seconds: int = 30,
+        named_jobs: dict[str, int] | None = None,
+    ) -> None:
         self._feeds = feeds
         self._jitter = jitter_seconds
+        # name -> interval seconds; each runs app.feeds.jobs:run_named_job(name).
+        self._named = dict(named_jobs or {})
         self._scheduler = BackgroundScheduler(
             jobstores={"default": SQLAlchemyJobStore(engine=engine, tablename="scheduler_jobs")},
             job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 900},
@@ -76,6 +85,25 @@ class FeedScheduler:
                 trigger=IntervalTrigger(seconds=int(AGING_INTERVAL.total_seconds())),
                 id=AGING_JOB_ID,
                 name="indicator aging",
+                replace_existing=True,
+            )
+        wanted = {f"job:{n}" for n in self._named}
+        for job in self._scheduler.get_jobs():
+            if job.id.startswith("job:") and job.id not in wanted:
+                self._scheduler.remove_job(job.id)
+        for name, seconds in self._named.items():
+            job_id = f"job:{name}"
+            existing = self._scheduler.get_job(job_id)
+            if existing and getattr(existing.trigger, "interval", None) == timedelta(
+                seconds=seconds
+            ):
+                continue
+            self._scheduler.add_job(
+                "app.feeds.jobs:run_named_job",
+                trigger=IntervalTrigger(seconds=seconds, jitter=self._jitter),
+                id=job_id,
+                name=name,
+                args=[name],
                 replace_existing=True,
             )
 

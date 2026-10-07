@@ -93,3 +93,4 @@ jobs:
         working-directory: backend
       - run: make demo-phase0
       - run: make demo-phase1
+      - run: make demo-phase2
