@@ -219,6 +219,27 @@ def test_c2_beacon_counts_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == [("162.243.103.246", 8080)] * 3
 
 
+def test_flood_stops_when_the_device_is_cut_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a quarantined device kept "flooding" (1,000 x 3 s timeouts ≈ 50 min).
+    cfg = LabConfig.from_env(
+        {"DSN_LAB_CREDENTIALS": str(_creds(tmp_path)), "DSN_LAB_BROKER": "10.77.2.10",
+         "DSN_LAB_SANDBOX": "1"}
+    )  # fmt: skip
+    attempts: list[int] = []
+    monkeypatch.setattr(attacks, "mqtt_client", lambda cfg, cid, password=None: object())
+
+    def refused(client: object, cfg: object, timeout: float = 5.0) -> bool:
+        attempts.append(1)
+        return False
+
+    monkeypatch.setattr(attacks, "_connected", refused)
+    monkeypatch.setattr(attacks, "_close", lambda c: None)
+    assert attacks.connect_flood(cfg, per_minute=1200, minutes=2, stop=threading.Event()) == 0
+    assert len(attempts) == attacks.MAX_FAILURES_IN_A_ROW
+
+
 def test_own_identity_picks_routed_ip() -> None:
     _mac, ip = own_identity("127.0.0.1", 9)
     assert ip == "127.0.0.1"

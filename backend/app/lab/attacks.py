@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 MAX_FLOOD_PER_MINUTE = 1200
 MAX_MINUTES = 10
+MAX_FAILURES_IN_A_ROW = 10  # a flood from a cut-off device stops instead of hanging
 
 
 def _connected(client: Any, cfg: LabConfig, timeout: float = 5.0) -> bool:
@@ -56,14 +57,23 @@ def connect_flood(cfg: LabConfig, per_minute: int, minutes: float, stop: threadi
     total = int(per_minute * min(minutes, MAX_MINUTES))
     gap = 60.0 / per_minute
     connects = 0
+    failures_in_a_row = 0
     start = time.monotonic()
+    deadline = start + min(minutes, MAX_MINUTES) * 60 + 30
     for i in range(total):
-        if stop.is_set():
+        if stop.is_set() or time.monotonic() > deadline:
             break
         client = mqtt_client(cfg, f"{cfg.username}-f{i}")
         if _connected(client, cfg, timeout=3.0):
             connects += 1
+            failures_in_a_row = 0
+        else:
+            failures_in_a_row += 1
         _close(client)
+        if failures_in_a_row >= MAX_FAILURES_IN_A_ROW:
+            # The device has been cut off (e.g. quarantined): stop instead of retrying.
+            log.info("flood stopped: broker unreachable", extra={"attempt": i + 1})
+            break
         stop.wait(max(0.0, start + (i + 1) * gap - time.monotonic()))
     log.info("flood done", extra={"attempts": total, "connected": connects})
     return connects

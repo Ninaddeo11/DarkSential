@@ -12,6 +12,7 @@ nftables), it measures with the wall clock of this host (the containers share it
 * quarantine_apply_ms operator API call -> the device IP is in the nft quarantine set
 * release_apply_ms    release API call -> IP gone from the set
 * reconnect_s         release -> the device's next MQTT CONNECT in the broker log
+                      (whole seconds: the broker log has 1 s resolution)
 * recovery_s          quarantine expiry -> DEVICE_RESTORED (auto-recovery)
 
 Rows go to docs/evaluation/phase7/lab_runs.csv. Nothing is estimated: a step that
@@ -180,6 +181,12 @@ def run_once(i: int, live: Live, token: str, devices: dict[str, dict[str, Any]])
     hit = poll(ioc_assessed, 150, 1.0)
     row["c2_rescore_s"] = round(hit - t0, 1) if hit else None
     row["c2_device"] = victim
+    # An unknown device contacting a known C2 is critical *with* evidence of compromise,
+    # so the engine may quarantine it: record that, then release it for the next steps.
+    victim_q = [q for q in http("GET", "/api/quarantines?status=active", token) if q["node_id"] == node]
+    row["c2_auto_quarantined"] = bool(victim_q)
+    for q in victim_q:
+        http("POST", f"/api/quarantines/{q['id']}/release", token, {"reason": "lab eval cleanup"})
 
     # 3. operator quarantine / release on the real firewall (plug-lab)
     q_ip = plug["ip"]
@@ -200,7 +207,9 @@ def run_once(i: int, live: Live, token: str, devices: dict[str, dict[str, Any]])
     row["release_apply_ms"] = round((gone - released_at) * 1000) if gone and released_at else None
     if released_at:
         rc = broker_connect_after("plug-lab", q_ip, released_at, 150)
-        row["reconnect_s"] = round(rc - released_at, 1) if rc else None
+        # The broker log has 1 s timestamps: a reconnect in the same second as the
+        # release reads as 0 (i.e. "within 1 s"), never as a sub-second value.
+        row["reconnect_s"] = max(0, round(rc - int(released_at))) if rc else None
     else:
         notes.append("no DEVICE_RESTORED")
 
@@ -246,21 +255,22 @@ def main() -> None:
     ]
     devices = {d["hostname"]: d for d in http("GET", "/api/devices", token) if d.get("hostname")}
     live = Live(token)
-    rows = []
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
     try:
         for i in range(args.runs):
             row = run_once(i, live, token, devices)
             print(json.dumps(row), flush=True)
             rows.append(row)
+            # Rewrite after every run, so an interrupted session keeps what finished.
+            fields = list(dict.fromkeys(k for r in rows for k in r))
+            with OUT.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
     finally:
         live.client.disconnect()
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    fields = list(dict.fromkeys(k for r in rows for k in r))
-    with OUT.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"wrote {OUT.relative_to(ROOT)}")
+    print(f"wrote {OUT.relative_to(ROOT)} ({len(rows)} runs)", flush=True)
 
 
 if __name__ == "__main__":
