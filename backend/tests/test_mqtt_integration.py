@@ -155,14 +155,24 @@ def test_signed_command_ack_telemetry_and_acl(rt: LabRuntime) -> None:
         bad, br = paho("esp32-node", "wrong-password", f"bad-{i}")
         assert br["rc"] == "Not authorized"
         bad.loop_stop()
-    time.sleep(2.5)  # broker log -> tailer (1 s poll) -> pipeline
+    # Broker log -> tailer (1 s poll) -> pipeline. Poll rather than sleep a fixed
+    # time: on a slow CI runner the broker flushes its log late.
+    results: list[Any] = []
+
+    def broker_log_seen() -> bool:
+        results.extend(rt.pipeline.flush())
+        hits = {h.rule_id for r in results for h in r.rule_hits}
+        failed = sum(r.features.get("failed_attempts", 0) for r in results)
+        return {"mqtt_wildcard_subscription", "mqtt_restricted_publish"} <= hits and failed >= 3
+
+    seen = wait_for(broker_log_seen, timeout=20.0)
     assert rg["msgs"] == []  # '#' grants nothing: ACL default deny
-    results = rt.pipeline.flush()
     hits = {h.rule_id for r in results for h in r.rule_hits}
     assert "mqtt_wildcard_subscription" in hits
     assert "mqtt_restricted_publish" in hits
     failed = sum(r.features.get("failed_attempts", 0) for r in results)
     assert failed >= 3  # the refused CONNECTs were seen in the broker log
+    assert seen
     for client in (status, dev, rogue):
         client.loop_stop()
         client.disconnect()
