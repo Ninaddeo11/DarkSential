@@ -2,14 +2,14 @@ import type { RiskLevel } from "../api/types";
 
 // Mirrors the @theme tokens in styles.css (the WebGL scene can't read CSS vars cheaply).
 export const LEVEL_COLOR: Record<RiskLevel, string> = {
-  low: "#34d399",
-  medium: "#fbbf24",
-  high: "#fb923c",
-  critical: "#f43f5e",
+  low: "#19D89A",
+  medium: "#FFC928",
+  high: "#FF9F2D",
+  critical: "#FF315A",
 };
-export const QUARANTINE_COLOR = "#e879f9";
-export const UNSCORED_COLOR = "#6b7f99";
-export const SIGNAL_COLOR = "#38d6f5";
+export const QUARANTINE_COLOR = "#FF315A";
+export const UNSCORED_COLOR = "#78909F";
+export const SIGNAL_COLOR = "#00D9FF";
 
 export function nodeColor(level: RiskLevel | null, quarantined: boolean): string {
   if (quarantined) return QUARANTINE_COLOR;

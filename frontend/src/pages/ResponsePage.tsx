@@ -43,8 +43,8 @@ export function ResponsePage() {
 
   return (
     <div className="space-y-3 pb-4">
-      <PageHeader title="Response" subtitle="Quarantines and the hash-chained audit log of every action.">
-        <button className="btn" onClick={() => api.auditVerify().then(setVerify).catch((e: unknown) => setError(String(e)))}>
+      <PageHeader title="Incident response center" subtitle="Quarantines and the hash-chained audit log of every action.">
+        <button className="btn command-action" onClick={() => api.auditVerify().then(setVerify).catch((e: unknown) => setError(String(e)))}>
           Verify audit chain
         </button>
       </PageHeader>
@@ -115,7 +115,8 @@ export function ResponsePage() {
               ))}
               {shown.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-4 text-center text-ink-400">
+                  <td colSpan={7} className="empty-state px-3 py-4 text-center text-ink-400">
+                    <span className="empty-shield" aria-hidden="true">{"\u25c7"}</span>
                     {tab === "active" ? "No active quarantines." : "No quarantines yet."}
                   </td>
                 </tr>
@@ -126,9 +127,10 @@ export function ResponsePage() {
       </section>
 
       <section className="panel mx-4">
-        <div className="panel-title">Audit log (newest first)</div>
+        <div className="panel-title">Forensic audit ledger / newest first</div>
         <div className="scroll-thin max-h-[480px] overflow-auto">
-          <table className="w-full text-xs">
+          <table className="audit-table w-full text-xs">
+            <thead><tr>{["#", "Timestamp", "Actor", "Action", "Status", "Target", "Payload", "Hash"].map(h => <th key={h}>{h}</th>)}</tr></thead>
             <tbody>
               {audit.map((a) => (
                 <tr key={a.id} className="border-t border-ink-800 align-top">

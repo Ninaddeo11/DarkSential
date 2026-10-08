@@ -1,0 +1,44 @@
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+
+// Use an isolated backend with temporary credentials, never production tokens.
+const base=process.argv[2]||'http://127.0.0.1:5176';
+const token=await fs.readFile(process.argv[3]||'node_modules/.nexus-review/auth-token.txt','utf8');
+const tabs=await(await fetch('http://127.0.0.1:9224/json')).json();
+const ws=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);
+await new Promise(r=>ws.addEventListener('open',r,{once:true}));
+let seq=0;const pending=new Map();
+ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);}});
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
+const until=async expression=>{for(let i=0;i<40;i++){if(await evaluate(expression))return;await wait(250);}throw Error('Authentication check timed out');};
+const submit=async(selector,secret)=>{
+  await evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(secret)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await wait(100);
+  await evaluate(`document.querySelector(${JSON.stringify(selector)}).form.requestSubmit()`);
+};
+await call('Page.enable');await call('Runtime.enable');
+await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+const clearSession=await call('Page.addScriptToEvaluateOnNewDocument',{source:`sessionStorage.removeItem('dsn.token')`});
+await call('Page.navigate',{url:base+'/access'});
+await until(`Boolean(document.querySelector('#access-token'))`);
+await until(`Boolean(document.querySelector('.dark-web-environment canvas'))`);
+await call('Page.removeScriptToEvaluateOnNewDocument',{identifier:clearSession.identifier});
+await evaluate(`sessionStorage.removeItem('dsn.token');window.authWorld=document.querySelector('.dark-web-environment canvas');true`);
+await submit('#access-token','invalid-test-credential');
+await until(`document.querySelector('#access-error')?.textContent.includes('invalid credentials')`);
+assert.equal(await evaluate(`document.querySelector('#access-token').disabled`),false);
+await submit('#access-token',token);
+await until(`location.pathname==='/overview'&&document.body.innerText.includes('Sign out')`);
+assert.equal(await evaluate(`Boolean(sessionStorage.getItem('dsn.token'))`),true);
+assert.equal(await evaluate(`document.querySelector('.dark-web-environment canvas')===window.authWorld`),true);
+await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Sign out').click()`);
+await until(`Boolean(document.querySelector('#embedded-token'))`);
+assert.equal(await evaluate(`sessionStorage.getItem('dsn.token')===null`),true);
+await submit('#embedded-token',token);
+await until(`document.body.innerText.includes('Sign out')&&!document.querySelector('#embedded-token')`);
+assert.equal(await evaluate(`document.querySelector('.dark-web-environment canvas')===window.authWorld`),true);
+console.log('Authentication passed: invalid-token error, viewer session, workspace entry, sign-out, embedded reauthentication, persistent world.');
+ws.close();

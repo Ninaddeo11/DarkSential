@@ -1,0 +1,86 @@
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const base=process.argv[2]||'http://127.0.0.1:5175';
+const tabs=await(await fetch('http://127.0.0.1:9224/json')).json();
+const ws=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);
+await new Promise(r=>ws.addEventListener('open',r,{once:true}));
+let seq=0;const pending=new Map(),exceptions=[],consoleErrors=[],badAssets=[],apiErrors=[];
+ws.addEventListener('message',e=>{
+  const m=JSON.parse(e.data);
+  if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);}
+  if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.exception?.description??m.params.exceptionDetails.text);
+  if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')consoleErrors.push(m.params.args.map(a=>a.value??a.description).join(' '));
+  if(m.method==='Network.responseReceived'&&m.params.response.status>=400){const{url,status}=m.params.response;(url.includes('/api/')?apiErrors:badAssets).push({url,status});}
+});
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result.value;};
+const ready=async selector=>{for(let i=0;i<30;i++){if(await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`))return;await wait(300);}throw Error(`Missing control: ${selector}`);};
+const shot=async name=>{const r=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(`node_modules/.nexus-review/${name}.png`,Buffer.from(r.data,'base64'));return r.data;};
+const navigate=async path=>{await evaluate(`history.pushState({},'',${JSON.stringify(path)});window.dispatchEvent(new PopStateEvent('popstate'))`);await wait(1000);};
+const scroll=async selector=>{await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`);await wait(700);};
+await fs.mkdir('node_modules/.nexus-review',{recursive:true});
+await Promise.all([call('Page.enable'),call('Runtime.enable'),call('Network.enable')]);
+await call('Emulation.setEmulatedMedia',{features:[]});
+await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+await call('Page.navigate',{url:base+'/'});await wait(5000);
+assert.equal(await evaluate('document.querySelectorAll(".dark-web-environment canvas").length'),1);
+assert.equal(await evaluate('document.querySelectorAll(".public-main canvas").length'),0,'Public pages must use the persistent world');
+await evaluate('window.nexusWorldCanvas=document.querySelector(".dark-web-environment canvas");true');
+await shot('world-landing');
+await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:1070,y:425});await wait(350);
+await evaluate(`document.querySelector('.world-category-controls button').click()`);await wait(250);
+assert.equal(await evaluate('document.querySelector(".world-selection span")?.textContent.includes("WEAPONS")'),true);
+await scroll('#threat-ecosystem');assert.equal(await evaluate('document.querySelectorAll(".research-entry").length'),8);await shot('world-research');
+await scroll('.continuous-mapping');await shot('world-mapping');
+await scroll('.continuous-terrain');await shot('world-infrastructure');
+await scroll('.cinematic-final');await shot('world-final');
+await evaluate(`document.querySelector('.public-header a[href="/about"]').click()`);await wait(1100);
+assert.equal(await evaluate('document.querySelector(".dark-web-environment canvas")===window.nexusWorldCanvas'),true);
+assert.equal(await evaluate('document.querySelector(".dark-web-environment").dataset.worldLayer'),'about');await shot('world-about');
+await evaluate(`document.querySelector('.public-header a[href="/intelligence"]').click()`);await wait(1100);
+assert.equal(await evaluate('document.querySelector(".dark-web-environment canvas")===window.nexusWorldCanvas'),true);
+await evaluate(`document.querySelector('.category-workbench button:nth-child(9)').click()`);await wait(400);
+assert.equal(await evaluate('document.querySelector(".category-briefing h2")?.textContent'),'Weapons intelligence');await shot('world-intelligence');
+for(const path of ['/dark-web','/dashboard','/overview','/devices','/devices/fictional-device','/events','/intel','/threat-intel','/response','/evaluation','/actors','/malware','/vulnerabilities','/access','/login','/landing']){
+  await navigate(path);
+  assert.equal(await evaluate('document.body.innerText.includes("No such page.")'),false,path);
+  assert.equal(await evaluate('document.querySelector(".dark-web-environment canvas")===window.nexusWorldCanvas'),true,`${path}: world reinitialized`);
+}
+await navigate('/overview');await ready('.command-section-title button');await evaluate(`document.querySelector('.command-section-title button').click()`);await wait(200);await shot('world-dashboard');
+await navigate('/devices');await ready('[aria-label="Risk level"]');await evaluate(`document.querySelector('[aria-label="Risk level"]').value='critical';document.querySelector('[aria-label="Risk level"]').dispatchEvent(new Event('change',{bubbles:true}))`);await wait(200);
+await navigate('/events');await ready('.event-timeline button');await evaluate(`document.querySelector('.event-timeline button').click()`);await wait(200);
+await navigate('/access');await shot('world-access');
+await navigate('/');await evaluate(`sessionStorage.removeItem('dsn.interface-intro');document.querySelector('.hero-ctas .nexus-entry').click()`);await wait(1100);
+assert.equal(await evaluate('location.pathname'),'/overview');assert.equal(await evaluate('document.querySelector(".dark-web-environment canvas")===window.nexusWorldCanvas'),true);
+await navigate('/');
+const performanceSample=await evaluate(`new Promise(resolve=>{let n=0;const start=performance.now();const sample=()=>{n++;const elapsed=performance.now()-start;if(elapsed>1500)resolve({rafHz:Number((n*1000/elapsed).toFixed(1)),tier:document.querySelector('.dark-web-environment').dataset.worldTier});else requestAnimationFrame(sample)};requestAnimationFrame(sample)})`);
+for(const width of [1600,1920,1024,390]){
+  await call('Emulation.setDeviceMetricsOverride',{width,height:width===390?844:1000,deviceScaleFactor:1,mobile:width===390});await wait(800);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,`Overflow at ${width}px`);
+  assert.equal(await evaluate('document.querySelector(".dark-web-environment canvas")===window.nexusWorldCanvas'),true);
+  await shot(`world-${width}`);
+}
+assert.equal(await evaluate('document.querySelector(".dark-web-environment").dataset.worldTier'),'mobile');
+await scroll('.hero-world-window');await shot('world-mobile-scene');
+await navigate('/overview');await evaluate(`document.querySelector('.mobile-nav-toggle').click()`);await wait(200);assert.equal(await evaluate(`document.querySelector('.mobile-nav-toggle').getAttribute('aria-expanded')`),'true');
+await navigate('/');await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});await wait(1200);
+await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:5,y:5});await wait(500);
+const stillA=await shot('world-reduced');await wait(850);const stillB=await shot('world-reduced-repeat');assert.equal(stillA,stillB,'Reduced motion must remain static');
+await call('Emulation.setEmulatedMedia',{features:[]});await wait(500);
+await evaluate(`Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'))`);await wait(400);
+const hiddenA=await shot('world-hidden');await wait(850);const hiddenB=await shot('world-hidden-repeat');assert.equal(hiddenA,hiddenB,'Hidden tab must pause');
+await evaluate(`delete document.hidden;document.dispatchEvent(new Event('visibilitychange'))`);
+const fallback=await call('Page.addScriptToEvaluateOnNewDocument',{source:`const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type.startsWith('webgl')?null:original.call(this,type,...args)};`});
+await call('Page.navigate',{url:base+'/'});await wait(2500);
+assert.equal(await evaluate('document.querySelector(".dark-web-environment").dataset.worldMode'),'atmospheric');
+assert.equal(await evaluate('document.querySelector(".dark-web-environment canvas")===null'),true);
+await evaluate(`document.querySelector('.world-category-controls button').click()`);await wait(200);assert.equal(await evaluate('document.querySelector(".world-selection span")?.textContent.includes("WEAPONS")'),true);await shot('world-fallback');
+await call('Page.removeScriptToEvaluateOnNewDocument',{identifier:fallback.identifier});
+await call('Page.navigate',{url:base+'/'});await wait(3000);
+await evaluate(`document.querySelector('.dark-web-environment canvas').getContext('webgl2').getExtension('WEBGL_lose_context').loseContext()`);await wait(700);
+assert.equal(await evaluate('document.querySelector(".dark-web-environment").dataset.worldMode'),'atmospheric');
+const report={base,checks:'persistent canvas across public and operational routes; pointer and category focus; full scroll; 16 operational/alias routes; dashboard reset; filters; CTA; 1440/1600/1920/tablet/mobile; mobile navigation; dynamic reduced motion; hidden tab; unavailable WebGL; context loss',performanceSample,exceptions,consoleErrors,badAssets,expectedHostedApiResponses:[...new Map(apiErrors.map(r=>[r.url,r])).values()]};
+await fs.writeFile('node_modules/.nexus-review/world-report.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+assert.equal(exceptions.length,0,'Uncaught exceptions');assert.equal(consoleErrors.length,0,'Console errors');assert.equal(badAssets.length,0,'Failed assets');assert.equal(apiErrors.every(r=>r.status===503),true,'Unexpected API status');ws.close();

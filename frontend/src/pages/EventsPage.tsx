@@ -12,7 +12,7 @@ export function EventsPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Events"
+        title="Live event stream"
         subtitle={`Live event stream (last ${state.events.length.toLocaleString()} kept in the browser).`}
       >
         {device && (

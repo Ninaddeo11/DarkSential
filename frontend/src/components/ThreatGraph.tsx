@@ -6,15 +6,15 @@ const NODE_W = 92;
 const NODE_H = 30;
 
 const LABEL_COLOR: Record<string, string> = {
-  Device: "#38d6f5",
-  CPE: "#93a4bb",
-  Vulnerability: "#fb923c",
-  Indicator: "#fbbf24",
-  Observable: "#fbbf24",
-  Malware: "#f43f5e",
-  IntrusionSet: "#f43f5e",
-  ThreatActor: "#f43f5e",
-  Campaign: "#e879f9",
+  Device: "#00D9FF",
+  CPE: "#8EA3B2",
+  Vulnerability: "#FF9F2D",
+  Indicator: "#FFC928",
+  Observable: "#FFC928",
+  Malware: "#FF315A",
+  IntrusionSet: "#FF315A",
+  ThreatActor: "#FF315A",
+  Campaign: "#FF315A",
   Report: "#a78bfa",
   AttackPattern: "#60a5fa",
 };
@@ -69,11 +69,11 @@ export function ThreatGraph({ paths }: { paths: PathStep[][] }) {
               <path
                 d={`M${sx},${y1} C${sx + 10},${y1} ${ex - 10},${y2} ${ex},${y2}`}
                 fill="none"
-                stroke="#2b3a4f"
+                stroke="#223443"
                 strokeWidth={1.5}
               />
               {l.via && (
-                <text x={(sx + ex) / 2} y={(y1 + y2) / 2 - 3} textAnchor="middle" fontSize={7} fill="#6b7f99">
+                <text x={(sx + ex) / 2} y={(y1 + y2) / 2 - 3} textAnchor="middle" fontSize={7} fill="#78909F">
                   {l.via.toLowerCase().replace(/_/g, " ")}
                 </text>
               )}
@@ -82,7 +82,7 @@ export function ThreatGraph({ paths }: { paths: PathStep[][] }) {
         })}
         {[...placed.values()].map((p) => {
           const [cx, cy] = center(p);
-          const color = LABEL_COLOR[p.step.label] ?? "#93a4bb";
+          const color = LABEL_COLOR[p.step.label] ?? "#8EA3B2";
           const name = p.step.name ?? p.step.node_id;
           const short = name.startsWith("cpe:2.3:") ? name.split(":").slice(3, 6).join(":") : name;
           return (
@@ -94,14 +94,14 @@ export function ThreatGraph({ paths }: { paths: PathStep[][] }) {
                 width={NODE_W}
                 height={NODE_H}
                 rx={5}
-                fill="#0e1520"
+                fill="#0B1118"
                 stroke={color}
                 strokeWidth={1}
               />
               <text x={cx} y={cy - 3} textAnchor="middle" fontSize={7} fill={color} letterSpacing={0.6}>
                 {p.step.label.toUpperCase()}
               </text>
-              <text x={cx} y={cy + 8} textAnchor="middle" fontSize={8.5} fill="#dce6f2">
+              <text x={cx} y={cy + 8} textAnchor="middle" fontSize={8.5} fill="#E8F2F7">
                 {short.length > 17 ? `${short.slice(0, 16)}…` : short}
               </text>
             </g>

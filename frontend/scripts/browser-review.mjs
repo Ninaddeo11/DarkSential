@@ -1,0 +1,17 @@
+import fs from 'node:fs/promises';
+const tabs = await (await fetch('http://127.0.0.1:9224/json')).json();
+const socket = new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);
+await new Promise(r=>socket.addEventListener('open',r,{once:true}));
+let seq=0;
+const pending=new Map();
+socket.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);}});
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
+await call('Page.enable');await call('Runtime.enable');
+await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+await call('Page.navigate',{url:process.argv[2]||'http://127.0.0.1:5173/'});
+await new Promise(r=>setTimeout(r,6500));
+await fs.mkdir('node_modules/.nexus-review',{recursive:true});
+const shot=await call('Page.captureScreenshot',{format:'png'});
+await fs.writeFile(`node_modules/.nexus-review/${process.argv[3]||'before'}.png`,Buffer.from(shot.data,'base64'));
+console.log(JSON.stringify(await call('Runtime.evaluate',{expression:'JSON.stringify({title:document.title,heading:document.querySelector("h1")?.innerText,canvas:document.querySelectorAll("canvas").length})',returnByValue:true})));
+socket.close();

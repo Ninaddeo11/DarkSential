@@ -1,3 +1,4 @@
+import { OperationalVisual } from "../visuals/OperationalVisual";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
@@ -66,6 +67,7 @@ export function DeviceDetailPage() {
           <Link to="/devices" className="text-xs text-signal hover:underline">
             ← Devices
           </Link>
+          <div className="device-detail-visual"><OperationalVisual /></div>
           <h1 className="mt-1 flex items-center gap-2 text-lg font-semibold">
             <span className="h-3 w-3 rounded-full" style={{ background: color }} />
             {d.hostname ?? d.ip ?? nodeId}

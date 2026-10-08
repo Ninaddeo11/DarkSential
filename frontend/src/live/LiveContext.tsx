@@ -92,7 +92,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [session]);
 
   useEffect(() => {
-    if (authNeeded || health?.deployment === "hosted") return;
+    if (authNeeded || !health || health.deployment === "hosted") return;
     return connectLive({
       token: getToken,
       lastSeq: () => store.getState().lastSeq,

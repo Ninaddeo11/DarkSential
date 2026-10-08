@@ -3,6 +3,8 @@ import { api, ApiError } from "../api/client";
 import type { CveMatch, RelatedThreat, Rule } from "../api/types";
 import { FeedHealth } from "../components/FeedHealth";
 import { ThreatGraph } from "../components/ThreatGraph";
+import { NexusScene } from "../visuals/NexusScene";
+import { graphFromPaths, ENTITY_COLOR } from "../visuals/model";
 import { PageHeader } from "../layout/Shell";
 
 const SEVERITY: Record<string, string> = {
@@ -13,6 +15,8 @@ const SEVERITY: Record<string, string> = {
 };
 
 export function IntelPage() {
+  const [related,setRelated] = useState<RelatedThreat[]|null>(null);
+  const graph = graphFromPaths((related??[]).map(t=>t.path));
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +29,7 @@ export function IntelPage() {
   return (
     <div className="space-y-3 pb-4">
       <PageHeader
-        title="Threat intelligence"
+        title="Threat intelligence workbench"
         subtitle="Feeds, the threat graph, indicator and CVE lookups, and the detection rules mapped to ATT&CK."
       />
       {error && <p className="px-4 text-xs text-critical">{error}</p>}
@@ -40,12 +44,13 @@ export function IntelPage() {
         </div>
       )}
       <div className="grid gap-3 px-4 xl:grid-cols-2">
-        <IocLookup />
+        <IocLookup onResult={setRelated} />
         <CveLookup />
       </div>
+      <section className="panel intel-relationship-scene mx-4"><div className="command-section-title"><div><span className="section-eyebrow">INTELLIGENCE / RELATIONSHIP PROJECTION</span><h2>Threat relationship graph</h2></div></div><NexusScene title="Threat intelligence relationship graph" nodes={related?graph.nodes:Object.entries(counts??{}).map(([kind,value])=>({id:kind,label:kind,kind,value,color:ENTITY_COLOR[kind]}))} edges={related?graph.edges:[]} caption={related?"OBSERVED / INDICATOR EVIDENCE PATHS":"GRAPH INVENTORY / AGGREGATE OBJECTS"} />{!related&&<p className="scene-explainer">Graph inventory by entity class. Run an indicator lookup above to project its returned relationships.</p>}</section>
       <div className="grid gap-3 px-4 xl:grid-cols-[360px_1fr]">
         <FeedHealth />
-        <section className="panel">
+        <section className="panel table-panel">
           <div className="panel-title">Detection rules → ATT&amp;CK</div>
           <table className="w-full text-xs">
             <tbody>
@@ -53,7 +58,7 @@ export function IntelPage() {
                 <tr key={r.id} className="border-t border-ink-800 align-top">
                   <td className="py-1.5 pl-3 font-mono text-[11px]">{r.id}</td>
                   <td className={`px-2 py-1.5 ${SEVERITY[r.severity] ?? ""}`}>{r.severity}</td>
-                  <td className="px-2 py-1.5 font-mono text-[11px] text-signal">{r.techniques.join(", ")}</td>
+                  <td className="px-2 py-1.5 font-mono text-[11px] text-signal">{r.techniques.map(t => <span key={t} className="technical-badge">{t}</span>)}</td>
                   <td className="py-1.5 pr-3 text-ink-300">{r.rationale}</td>
                 </tr>
               ))}
@@ -65,7 +70,7 @@ export function IntelPage() {
   );
 }
 
-function IocLookup() {
+function IocLookup({onResult}:{onResult?:(result:RelatedThreat[]|null)=>void}) {
   const [ioc, setIoc] = useState("162.243.103.246");
   const [result, setResult] = useState<RelatedThreat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,9 +78,12 @@ function IocLookup() {
     e.preventDefault();
     setError(null);
     try {
-      setResult(await api.relatedThreats(ioc.trim()));
+      const value = await api.relatedThreats(ioc.trim());
+      setResult(value);
+      onResult?.(value);
     } catch (err) {
       setResult(null);
+      onResult?.(null);
       setError(err instanceof ApiError ? err.message : String(err));
     }
   };

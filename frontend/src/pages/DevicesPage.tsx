@@ -19,6 +19,7 @@ export function DevicesPage() {
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<(typeof LEVEL_FILTERS)[number]>("all");
   const [onlyQuarantined, setOnlyQuarantined] = useState(false);
+  const [trust, setTrust] = useState("all");
   const [onlyUnknown, setOnlyUnknown] = useState(false);
   const [sort, setSort] = useState<SortKey>("risk");
 
@@ -29,6 +30,7 @@ export function DevicesPage() {
       if (q && ![d.hostname, d.ip, d.vendor, d.node_id].some((v) => v?.toLowerCase().includes(q))) return false;
       if (level === "unscored" ? n.level !== null : level !== "all" && n.level !== level) return false;
       if (onlyQuarantined && !n.quarantined) return false;
+      if (trust !== "all" && d.trust !== trust) return false;
       if (onlyUnknown && d.trust !== "unknown") return false;
       return true;
     });
@@ -40,14 +42,13 @@ export function DevicesPage() {
       seen: (a, b) => b.device.last_seen.localeCompare(a.device.last_seen),
     };
     return list.sort(by[sort]);
-  }, [state.nodes, query, level, onlyQuarantined, onlyUnknown, sort]);
+  }, [state.nodes, query, level, onlyQuarantined, onlyUnknown, sort, trust]);
 
   const header = (key: SortKey, label: string, cls = "") => (
-    <th className={`px-3 py-2 text-left font-semibold ${cls}`}>
+    <th className={`px-3 py-2 text-left font-semibold ${cls}`} aria-sort={sort === key ? (["risk", "seen"].includes(key) ? "descending" : "ascending") : "none"}>
       <button
         onClick={() => setSort(key)}
         className={`uppercase tracking-wider ${sort === key ? "text-signal" : "text-ink-400 hover:text-ink-100"}`}
-        aria-sort={sort === key ? "descending" : "none"}
       >
         {label}
         {sort === key ? " ↓" : ""}
@@ -57,7 +58,7 @@ export function DevicesPage() {
 
   return (
     <div>
-      <PageHeader title="Devices" subtitle={`${rows.length} of ${Object.keys(state.nodes).length} devices`}>
+      <PageHeader title="Device inventory" subtitle={`${rows.length} of ${Object.keys(state.nodes).length} devices`}>
         <input
           className="input w-56"
           placeholder="Search name, IP, vendor, id"
@@ -77,6 +78,7 @@ export function DevicesPage() {
             </option>
           ))}
         </select>
+        <select className="input w-32" aria-label="Trust filter" value={trust} onChange={e => setTrust(e.target.value)}>{["all", "unknown", "known", "approved"].map(t => <option key={t} value={t}>{t === "all" ? "all trust" : t}</option>)}</select>
         <label className="flex items-center gap-1.5 text-xs text-ink-300">
           <input type="checkbox" checked={onlyQuarantined} onChange={(e) => setOnlyQuarantined(e.target.checked)} />
           quarantined
@@ -110,6 +112,7 @@ export function DevicesPage() {
                     onClick={() => navigate(`/devices/${d.node_id}`)}
                     onKeyDown={(e) => e.key === "Enter" && navigate(`/devices/${d.node_id}`)}
                     tabIndex={0}
+                    data-severity={n.level ?? "unscored"}
                     className="cursor-pointer border-b border-ink-800 hover:bg-ink-800 focus:bg-ink-800 focus:outline-none"
                   >
                     <td className="px-3 py-2">
@@ -118,12 +121,13 @@ export function DevicesPage() {
                         <span className={`font-mono ${n.level ? LEVEL_TEXT[n.level] : "text-ink-400"}`}>
                           {n.score !== null ? n.score.toFixed(1) : "–"}
                         </span>
+                        <span className={`chip ${n.level ? LEVEL_TEXT[n.level] : "text-ink-400"}`}>{n.level ?? "unscored"}</span>
                         {n.quarantined && <span className="chip bg-quarantine/15 text-quarantine">quarantined</span>}
                       </span>
                     </td>
                     <td className="px-3 py-2">
                       <div className="font-medium">{name(n)}</div>
-                      <div className="font-mono text-[10px] text-ink-400">{d.node_id}</div>
+                      <div className="whitespace-nowrap font-mono text-[10px] text-ink-400">{d.node_id}</div>
                     </td>
                     <td className="px-3 py-2 font-mono">{d.ip ?? "—"}</td>
                     <td className="max-w-48 truncate px-3 py-2 text-ink-300">{d.vendor ?? "—"}</td>

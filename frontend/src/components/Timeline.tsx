@@ -3,7 +3,7 @@ import type { DsnEvent, EventType } from "../generated/events";
 import { EVENT_TYPES } from "../generated/events";
 import type { NodeState } from "../live/store";
 
-const ROW = 30;
+const ROW = 64;
 const OVERSCAN = 8;
 
 const TYPE_STYLE: Record<EventType, string> = {
@@ -80,7 +80,7 @@ export function Timeline({ events, nodes, selected, onSelect, initialOnlySelecte
   };
 
   return (
-    <section className="panel flex h-full min-h-0 flex-col">
+    <section className="event-timeline panel flex h-full min-h-0 flex-col">
       <div className="panel-title">
         <span>
           Event timeline <span className="ml-1 font-mono text-ink-400 normal-case">{rows.length}</span>
@@ -99,6 +99,7 @@ export function Timeline({ events, nodes, selected, onSelect, initialOnlySelecte
         {EVENT_TYPES.map((t) => (
           <button
             key={t}
+            aria-pressed={!hidden.has(t)}
             className={`chip border border-ink-700 ${hidden.has(t) ? "text-ink-600 line-through" : TYPE_STYLE[t]}`}
             onClick={() => {
               const next = new Set(hidden);
@@ -119,12 +120,14 @@ export function Timeline({ events, nodes, selected, onSelect, initialOnlySelecte
             return (
               <button
                 key={e.seq}
-                className={`absolute left-0 flex w-full items-center gap-2 px-3 text-left text-[11px] hover:bg-ink-800 ${
+                title={JSON.stringify(e.payload, null, 2)}
+                className={`timeline-row absolute left-0 flex w-full items-center gap-2 px-3 text-left text-[11px] hover:bg-ink-800 ${
                   e.node_id === selected ? "bg-ink-800/70" : ""
                 }`}
                 style={{ top: (first + i) * ROW, height: ROW }}
                 onClick={() => e.node_id && onSelect(e.node_id)}
               >
+                <span aria-hidden="true" className={`timeline-node ${TYPE_STYLE[e.type]}`} />
                 <span className="w-16 shrink-0 font-mono text-ink-400">
                   {new Date(e.ts).toLocaleTimeString([], { hour12: false })}
                 </span>

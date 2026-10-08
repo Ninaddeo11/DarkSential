@@ -68,7 +68,7 @@ export function FeedHealth() {
                   <span className={`mr-2 inline-block h-1.5 w-1.5 rounded-full ${tone}`} />
                   {f.name}
                 </td>
-                <td className="text-ink-400">{f.mode}</td>
+                <td className="text-ink-400"><span className="chip">{state}</span><br />{f.mode}</td>
                 <td className="font-mono text-ink-300">{run ? `${run.objects}` : "–"}</td>
                 <td className="pr-3 text-right text-ink-400">{age(f.last_success_at)}</td>
               </tr>
