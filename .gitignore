@@ -6,7 +6,7 @@ infra/mosquitto/certs/*
 !infra/mosquitto/certs/.gitkeep
 infra/mosquitto/passwd
 infra/mosquitto/credentials.json
-firmware/esp32-node/provisioning/
+infra/lab/secrets/
 
 # Python
 __pycache__/
@@ -34,9 +34,6 @@ backend/data/
 node_modules/
 frontend/dist/
 
-# Firmware
-firmware/**/.pio/
-firmware/**/secrets.h
 
 # Local Claude Code session settings
 .claude/

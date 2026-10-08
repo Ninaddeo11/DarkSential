@@ -1,4 +1,4 @@
-"""Commands to the ESP32 status node, and its acks.
+"""Commands to the status node (a virtual lab client), and its acks.
 
 Command topic: ``dsn/cmd/status-node``. Payload (JSON)::
 
@@ -6,12 +6,12 @@ Command topic: ``dsn/cmd/status-node``. Payload (JSON)::
      "node_id": "dev-…" | "", "level": "critical" | "", "ttl": 60, "sig": "<hex>"}
 
 ``sig`` = HMAC-SHA256(command_key, "id|ts|cmd|node_id|level|ttl"). The message is
-a pipe-joined string, not JSON: it's trivially and identically reproducible in
-the ESP32 firmware (re-serializing JSON byte-for-byte across languages is
+a pipe-joined string, not JSON, so any implementation (Python, embedded C)
+reproduces it identically (re-serializing JSON byte-for-byte across languages is
 fragile). Every field is restricted to ``[A-Za-z0-9._:-]`` so no field can
-contain the separator. The firmware (``firmware/esp32-node``) drops unsigned,
+contain the separator. The status node (``app.lab.status_node``) drops unsigned,
 badly signed, stale (|now - ts| > ttl) or replayed (seen id) commands, so a
-client that gets past the broker ACLs still can't drive the LEDs.
+client that gets past the broker ACLs still can't drive its state.
 
 Ack topic: ``dsn/ack/status-node``, payload ``{"id": "<command id>", "status": "ok|bad_sig|
 stale|replay|bad_cmd"}``. Acks are informational (audited). They never gate

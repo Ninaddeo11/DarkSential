@@ -1,0 +1,190 @@
+# Virtual lab: software IoT devices, a virtual status node and a gateway that
+# really enforces. No hardware needed. Use with the base stack:
+#
+#   python scripts/tasks.py lab-up       (provisions, then compose up)
+#   docker compose --env-file .env -f infra/docker-compose.yml \
+#                  -f infra/docker-compose.lab.yml up -d --build
+#
+# Topology. Isolation comes from routing, not Docker's `internal` flag (which drops
+# routed lab-to-lab packets on the host bridge): each lab client's only route is
+# via the backend gateway, clients drop every capability after setting it (so they
+# can't change it), and the gateway's egress lock forwards only lab-to-lab traffic.
+#
+#   lab-devices 10.77.1.0/24             lab-services 10.77.2.0/24
+#   cam-front .71  cam-yard .72   ┌──────────────┐   mosquitto .10
+#   thermo-hall .73 plug-lab .74  │ backend .1.2 │
+#   sensor-gate .75 status-node .80 ─► gateway ◄─ .2.2
+#   rogue-sensor .99 (profile attack)  capture + nftables
+#   └──────────────┘
+#
+# Every device routes through the backend container, which captures the traffic
+# (behavior pipeline), scans the device subnet with nmap, and quarantines with
+# nftables in ITS OWN network namespace: enforcement is real but confined to the
+# sandbox. An egress lock (infra/lab/gateway-entry.sh) drops anything that isn't
+# lab-to-lab, so a "C2 beacon" is seen and dropped, never sent.
+
+x-lab-client: &lab-client
+  build:
+    context: ../backend
+    dockerfile: ../infra/lab/client.Dockerfile
+    additional_contexts:
+      lab: ./lab
+  image: dsn-lab-client:local
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  # Root only long enough to set the route and install creds; then setpriv drops all.
+  cap_drop: [ALL]
+  cap_add: [NET_ADMIN, CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SETPCAP]
+  security_opt: ["no-new-privileges:true"]
+  sysctls:
+    net.ipv4.ip_unprivileged_port_start: "0"  # device services on 80/554 without root
+  # Docker's embedded DNS would forward outside names to the host's resolvers;
+  # point its upstream at nothing so lab clients can't resolve (or tunnel) out.
+  dns: [127.0.0.1]
+  depends_on:
+    mosquitto:
+      condition: service_healthy
+    backend:
+      condition: service_started
+
+services:
+  mosquitto:
+    cap_add: [NET_ADMIN]  # one route to the device subnet (see entrypoint.sh)
+    environment:
+      LAB_ROUTE: "10.77.1.0/24 via 10.77.2.2"
+    networks:
+      backplane: {}
+      lab-services:
+        ipv4_address: 10.77.2.10
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../infra/gateway.Dockerfile
+    user: "0"  # gateway-entry.sh drops to `dsn` with only NET_ADMIN + NET_RAW
+    entrypoint: ["/bin/sh", "/lab/gateway-entry.sh"]
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, SETUID, SETGID, SETPCAP]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    environment:
+      DSN_DRY_RUN: "false"  # real nftables, inside this container's namespace only
+      DSN_RESPONSE_DRIVER: nftables
+      # Lab clients only: never the Docker host bridge (.1) or the gateway (.2).
+      DSN_LAB_CIDR: 10.77.1.64/26
+      DSN_PROTECTED_HOSTS: 10.77.1.2,10.77.2.2,10.77.2.10
+      DSN_PASSIVE_CAPTURE_ENABLED: "true"
+      DSN_PASSIVE_CAPTURE_TRAFFIC: "true"
+      DSN_NMAP_ENABLED: "true"
+      DSN_NMAP_INTERVAL_MINUTES: "5"
+    volumes:
+      - ./lab/gateway-entry.sh:/lab/gateway-entry.sh:ro
+    networks:
+      backplane: {}
+      lab-devices:
+        ipv4_address: 10.77.1.2
+      lab-services:
+        ipv4_address: 10.77.2.2
+
+  cam-front:
+    <<: *lab-client
+    command: ["device", "--profile", "camera"]
+    environment: &lab-env
+      DSN_LAB_GATEWAY: 10.77.1.2
+      DSN_LAB_BROKER: 10.77.2.10
+    volumes:
+      - ./lab/secrets/cam-front.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.71
+        mac_address: "44:19:b6:10:00:11"
+
+  cam-yard:
+    <<: *lab-client
+    command: ["device", "--profile", "vulncam"]
+    environment: *lab-env
+    volumes:
+      - ./lab/secrets/cam-yard.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.72
+        mac_address: "bc:ad:28:10:00:12"
+
+  thermo-hall:
+    <<: *lab-client
+    command: ["device", "--profile", "thermostat"]
+    environment: *lab-env
+    volumes:
+      - ./lab/secrets/thermo-hall.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.73
+        mac_address: "24:0a:c4:10:00:13"
+
+  plug-lab:
+    <<: *lab-client
+    command: ["device", "--profile", "plug"]
+    environment: *lab-env
+    volumes:
+      - ./lab/secrets/plug-lab.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.74
+        mac_address: "68:57:2d:10:00:14"
+
+  sensor-gate:
+    <<: *lab-client
+    command: ["device", "--profile", "sensor"]
+    environment: *lab-env
+    volumes:
+      - ./lab/secrets/sensor-gate.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.75
+        mac_address: "30:ae:a4:10:00:15"
+
+  status-node:
+    <<: *lab-client
+    command: ["status-node"]
+    environment: *lab-env
+    volumes:
+      - ./lab/secrets/status-node.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.80
+        mac_address: "84:0d:8e:10:00:20"
+
+  # The "unknown device" scenario: a sensor with a locally administered MAC that
+  # nobody approved. Started on demand: `python scripts/tasks.py lab-attack rogue`.
+  rogue-sensor:
+    <<: *lab-client
+    profiles: [attack]
+    restart: "no"
+    command: ["device", "--profile", "sensor"]
+    environment: *lab-env
+    volumes:
+      - ./lab/secrets/rogue-sensor.json:/run/lab-src/client.json:ro
+      - ./mosquitto/certs/ca.crt:/run/lab-src/ca.crt:ro
+    networks:
+      lab-devices:
+        ipv4_address: 10.77.1.99
+        mac_address: "02:5e:aa:bb:cc:66"
+
+networks:
+  lab-devices:
+    ipam:
+      config:
+        - subnet: 10.77.1.0/24
+          gateway: 10.77.1.1
+  lab-services:
+    ipam:
+      config:
+        - subnet: 10.77.2.0/24
+          gateway: 10.77.2.1

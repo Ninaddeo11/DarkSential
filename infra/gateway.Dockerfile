@@ -12,7 +12,7 @@ RUN uv sync --frozen --no-dev --extra lab --extra ml
 
 FROM python:3.13.15-slim-trixie
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends nftables nmap \
+  && apt-get install -y --no-install-recommends nftables nmap iproute2 \
   && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --home-dir /srv dsn
 WORKDIR /srv
@@ -29,4 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin \
   && setcap cap_net_raw,cap_net_admin+ep /usr/bin/nmap \
   && rm -rf /var/lib/apt/lists/*
 USER dsn
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status == 200 else 1)"]
 CMD ["python", "-m", "app"]

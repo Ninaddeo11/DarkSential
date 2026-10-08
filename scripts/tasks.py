@@ -42,12 +42,15 @@ def _require(tool: str) -> None:
         sys.exit(f"'{tool}' not found on PATH")
 
 
-@task
-def setup() -> None:
-    """Install deps; create .env with generated secrets; provision MQTT TLS + creds."""
-    _require("uv")
-    run(["uv", "sync", "--frozen", "--all-extras"], cwd=BACKEND)
-    run([NPM, "ci"], cwd=FRONTEND)
+# Virtual lab clients (infra/docker-compose.lab.yml); the broker's lab address goes
+# into its certificate so lab clients verify it by IP.
+LAB_CLIENTS = ["cam-front", "cam-yard", "thermo-hall", "plug-lab", "sensor-gate", "rogue-sensor"]
+LAB_BROKER_IP = "10.77.2.10"
+API_PORT = os.environ.get("DSN_BACKEND_HOST_PORT", "8000")
+LAB_COMPOSE = [*COMPOSE, "-f", str(ROOT / "infra" / "docker-compose.lab.yml")]
+
+
+def _ensure_env() -> Path:
     env_file = ROOT / ".env"
     if not env_file.exists():
         text = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -57,10 +60,17 @@ def setup() -> None:
         text = text.replace("change-me-to-a-long-random-password", secrets.token_urlsafe(24))
         env_file.write_text(text, encoding="utf-8")
         print("created .env with freshly generated secrets")
-    creds_file = ROOT / "infra" / "mosquitto" / "credentials.json"
+    return env_file
+
+
+def _provision_mqtt() -> None:
+    """Broker PKI + per-client credentials (idempotent); backend creds into .env."""
+    env_file = _ensure_env()
+    devices = [a for d in LAB_CLIENTS for a in ("--device", d)]
     run(["uv", "run", "python", "../scripts/mqtt_provision.py", "--host", "mosquitto",
-         "--host", "localhost"], cwd=BACKEND)
-    creds = json.loads(creds_file.read_text(encoding="utf-8"))
+         "--host", "localhost", "--ip", "127.0.0.1", "--ip", LAB_BROKER_IP, *devices],
+        cwd=BACKEND)
+    creds = json.loads((ROOT / "infra" / "mosquitto" / "credentials.json").read_text("utf-8"))
     env = env_file.read_text(encoding="utf-8")
     for key, value in (("DSN_MQTT_PASSWORD", creds["users"]["dsn-backend"]),
                        ("DSN_MQTT_COMMAND_KEY", creds["command_key"])):
@@ -69,6 +79,15 @@ def setup() -> None:
         env = "\n".join(lines) + "\n"
     env_file.write_text(env, encoding="utf-8")
     print("MQTT provisioned: backend credentials + command key written to .env")
+
+
+@task
+def setup() -> None:
+    """Install deps; create .env with generated secrets; provision MQTT TLS + creds."""
+    _require("uv")
+    run(["uv", "sync", "--frozen", "--all-extras"], cwd=BACKEND)
+    run([NPM, "ci"], cwd=FRONTEND)
+    _provision_mqtt()
 
 
 @task
@@ -130,6 +149,72 @@ def up() -> None:
 @task
 def down() -> None:
     run([*COMPOSE, "down"])
+
+
+@task
+def lab_up() -> None:
+    """Start the virtual lab: broker, gateway backend, 5 IoT devices + status node."""
+    _require("docker")
+    _require("uv")
+    _provision_mqtt()
+    run([*LAB_COMPOSE, "up", "-d", "--build", "--wait"])
+    # Feeds otherwise first run on their schedule (hours away): load intel now.
+    run([*LAB_COMPOSE, "exec", "-T", "--user", "dsn", "backend",
+         "python", "-m", "app.cli", "ingest"])
+    print(f"virtual lab up: API http://127.0.0.1:{API_PORT}  (lab-status, lab-attack <scenario>)")
+
+
+@task
+def lab_down() -> None:
+    """Stop the virtual lab (keeps volumes)."""
+    run([*LAB_COMPOSE, "--profile", "attack", "down"])
+
+
+@task
+def lab_status() -> None:
+    """Containers + what the backend currently knows about each lab device."""
+    run([*LAB_COMPOSE, "ps", "--format", "table {{.Service}}\t{{.State}}\t{{.Status}}"])
+    try:
+        _, devices = _get(f"http://127.0.0.1:{API_PORT}/api/devices")
+    except (urllib.error.URLError, OSError) as exc:
+        sys.exit(f"backend not reachable: {exc}")
+    for dev in devices if isinstance(devices, list) else []:
+        print(f"  {dev.get('ip') or '-':<14}{dev.get('node_id', '')[:20]:<22}"
+              f"{dev.get('trust', '')!s:<10}{(dev.get('vendor') or '')[:28]}")
+
+
+@task
+def lab_smoke() -> None:
+    """End-to-end check of a running lab (discovery, KEV link, IOC-contact re-score)."""
+    run([sys.executable, str(ROOT / "scripts" / "lab_smoke.py")])
+
+
+LAB_SCENARIOS: dict[str, tuple[str, list[str]]] = {
+    # scenario: (service to run it in, app.lab arguments)
+    "flood": ("plug-lab", ["attack", "flood", "--per-minute", "500", "--minutes", "2"]),
+    "wildcard": ("plug-lab", ["attack", "wildcard", "--seconds", "90"]),
+    "restricted": ("plug-lab", ["attack", "restricted", "--count", "10"]),
+    "bad-auth": ("thermo-hall", ["attack", "bad-auth", "--attempts", "20"]),
+    "c2": ("cam-yard", ["attack", "c2", "--count", "5", "--interval", "3"]),
+}
+
+
+@task
+def lab_attack() -> None:
+    """Run a lab scenario: lab-attack <rogue|flood|wildcard|restricted|bad-auth|c2> [device]."""
+    scenario = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("SCENARIO", "")
+    if scenario == "rogue":
+        run([*LAB_COMPOSE, "--profile", "attack", "up", "-d", "rogue-sensor"])
+        return
+    if scenario not in LAB_SCENARIOS:
+        sys.exit(f"scenario must be one of: rogue, {', '.join(LAB_SCENARIOS)}")
+    service, args = LAB_SCENARIOS[scenario]
+    if len(sys.argv) > 3:  # optional: make a different lab device misbehave
+        service = sys.argv[3]
+        if service not in {*LAB_CLIENTS, "status-node"}:
+            sys.exit(f"unknown lab device {service!r}")
+    run([*LAB_COMPOSE, "exec", "-T", "--user", "10001", "-e", "DSN_LAB_CREDENTIALS=/tmp/lab/client.json",
+         "-e", "DSN_LAB_CA=/tmp/lab/ca.crt", service, "python", "-m", "app.lab", *args])
 
 
 @task
@@ -272,7 +357,7 @@ def docker_test_mqtt() -> None:
     (work / "log").mkdir(parents=True)
     _docker_backend(
         "uv run python ../scripts/mqtt_provision.py --out data/mqtt-it --host mosquitto "
-        "--device esp32-node --device rogue-sensor --no-firmware"
+        "--device esp32-node --device rogue-sensor --no-device-files"
     )
     mosq = ROOT / "infra" / "mosquitto"
     run([
@@ -300,25 +385,6 @@ def docker_test_mqtt() -> None:
     finally:
         subprocess.run(["docker", "logs", "--tail", "5", TEST_MOSQUITTO], check=False)
         subprocess.run(["docker", "rm", "-f", TEST_MOSQUITTO], capture_output=True, check=False)
-
-
-PIO_IMAGE = "python:3.12-bookworm"  # needs a host gcc for the native test env
-PIO_VERSION = "6.2.0"
-
-
-@task
-def firmware_test() -> None:
-    """ESP32 firmware: native unit tests + esp32dev / esp32dev_ble builds (PlatformIO)."""
-    _require("docker")
-    fw = ROOT / "firmware" / "esp32-node"
-    run([
-        "docker", "run", "--rm", "-v", f"{fw}:/src:ro", "-v", "dsn-pio-cache:/root/.platformio",
-        "-w", "/work", PIO_IMAGE, "sh", "-c",
-        # Build in a copy so no .pio/ output lands in the repo.
-        "cp -r /src/. /work && rm -rf /work/.pio && "
-        f"pip install -q --root-user-action=ignore platformio=={PIO_VERSION} && "
-        "pio test -e native && pio run -e esp32dev -e esp32dev_ble",
-    ])
 
 
 @task
@@ -412,7 +478,7 @@ def demo_phase0() -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in TASKS:
+    if len(sys.argv) < 2 or sys.argv[1] not in TASKS:
         print("tasks:")
         for name, fn in TASKS.items():
             print(f"  {name:<14} {(fn.__doc__ or '').strip()}")

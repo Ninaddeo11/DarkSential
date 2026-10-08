@@ -22,4 +22,10 @@ LOG=/mosquitto/log/mosquitto.log
 chown "mosquitto:$LOG_GID" /mosquitto/log "$LOG"
 chmod 0750 /mosquitto/log
 chmod 0640 "$LOG"
+# Virtual lab only: reach the device subnet via the DSN gateway, so the broker
+# (and its log) sees real device IPs, e.g. LAB_ROUTE="10.77.1.0/24 via 10.77.2.2".
+if [ -n "${LAB_ROUTE:-}" ]; then
+  # shellcheck disable=SC2086 # word splitting is the point: "<net> via <gw>"
+  ip route replace $LAB_ROUTE
+fi
 exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf

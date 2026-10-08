@@ -18,7 +18,7 @@ streams everything to a real-time 3D command center.
 | 2 | Device discovery and behavior baselines | ✅ done |
 | 3 | Explainable risk engine | ✅ done |
 | 4 | Quarantine and recovery | ✅ done |
-| 5 | Mosquitto TLS/ACL and ESP32 firmware | ✅ done |
+| 5 | Mosquitto TLS/ACL and the virtual IoT lab | ✅ done |
 | 6 | Real-time API and 3D command center | ⏳ |
 | 7 | Simulation and evaluation | ⏳ |
 
@@ -35,6 +35,7 @@ make demo-phase2    # devices + behavior: nmap fixture, simulated traffic + atta
 make demo-phase3    # explainable risk: scored decisions, contributions, evidence paths, SHAP
 make demo-phase4    # quarantine/recovery: refusal, auto-quarantine, reconcile, audit chain
 make demo-phase5    # IoT: telemetry validation, signed commands + acks, broker-log rules
+make lab-up         # the virtual IoT lab (Docker): devices, gateway, real nftables quarantine
 make ablation       # re-run the executed ablation notebook (docs/evaluation/)
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
 make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
@@ -180,43 +181,50 @@ set `DSN_DRY_RUN=false` and `DSN_PROTECTED_HOSTS`, then
 (host network, `NET_ADMIN`/`NET_RAW` only, nftables driver). Read the warnings
 in that file first.
 
-### IoT layer: broker and ESP32 (Phase 5)
+### Virtual lab: no hardware needed (Phase 5)
 
-The Mosquitto broker (`infra/mosquitto/`) is set up as follows:
+The whole platform runs in software. `make lab-up` starts a sandboxed IoT network in Docker:
 
-- **Transport.** It accepts **TLS only**, on port 8883, using a lab CA with EC P-256 keys.
-- **Accounts.** Every client has its own password, stored as a PBKDF2-SHA512 hash. Anonymous access is off.
-- **Topic access.** ACLs are deny-by-default: a device can publish only to `dsn/telemetry/<its own user>`.
-- **Limits.** `mosquitto.conf` caps connection count, packet size, keepalive, and in-flight and queued messages. Mosquitto has no per-client message-rate limit, so message floods are detected (`mqtt_connect_flood`) rather than throttled. A host-level new-connection rate limit is in `broker-ratelimit.nft`.
+| Lab client | What it is |
+|---|---|
+| `cam-front` | IP camera (Hikvision MAC prefix), modern web server |
+| `cam-yard` | IP camera whose web server answers as **GoAhead 3.6.4**, a version with CVE-2017-17562 on CISA's known-exploited list (a banner only, no vulnerable code) |
+| `thermo-hall`, `plug-lab`, `sensor-gate` | thermostat, smart plug and air sensor |
+| `status-node` | the virtual status node: verifies HMAC-signed commands and shows NORMAL / ALERT / QUARANTINED in its telemetry |
+| `rogue-sensor` | an unapproved device with a randomized MAC, started on demand |
 
-`make setup` provisions everything the broker and the backend need:
+Every device's traffic is routed through the **backend container, which acts as the lab gateway**:
 
-- the CA and server certificate
-- the `passwd` file
-- the backend's MQTT password and command key, written into `.env`
-- one serial provisioning file per ESP32 (gitignored)
+- **Discovery.** It scans the device range with nmap and identifies vendors from MAC addresses.
+- **Capture.** It captures each device's connections into the behavior pipeline.
+- **Enforcement.** It quarantines with **real nftables rules**, confined to its own network namespace. A quarantined device is genuinely cut off from the broker.
+- **Egress lock.** Only device ↔ broker traffic is forwarded. Anything else, such as a beacon to a known C2 address, is recorded and dropped. Nothing leaves the sandbox.
 
-To add devices, run `python scripts/mqtt_provision.py --device <name> --host <broker-ip>`.
+```bash
+make lab-up                          # provision, start, load threat intel
+make lab-status                      # containers + what the backend knows per device
+python scripts/tasks.py lab-attack flood            # plug-lab: 500 MQTT connects/min for 2 min
+python scripts/tasks.py lab-attack c2 [device]      # beacon to a Feodo-listed C2 IP (dropped)
+python scripts/tasks.py lab-attack wildcard         # subscribe to '#' and the command topics
+python scripts/tasks.py lab-attack restricted       # publish to topics the ACL forbids
+python scripts/tasks.py lab-attack bad-auth         # wrong-password logins
+python scripts/tasks.py lab-attack rogue            # an unknown device joins
+make lab-down
+```
 
-The backend:
+If port 8000 is taken, set `DSN_BACKEND_HOST_PORT` (e.g. `8010`) before `lab-up`; the lab tasks use it too.
 
-- **Consumes telemetry.** Payloads are validated (size, schema, charset) before they reach the device registry.
-- **Tails the broker log.** CONNECT, authentication failures, wildcard subscriptions and ACL-denied publishes become behavior events. This is how the `mqtt_wildcard_subscription` and `mqtt_restricted_publish` rules fire on real traffic.
-- **Signs the commands it sends** to the status node with HMAC.
+The broker (`infra/mosquitto/`):
 
-The [ESP32 firmware](firmware/esp32-node/README.md) does the following:
+- **Transport.** TLS only, on port 8883, using a lab CA with EC P-256 keys.
+- **Accounts.** Every client has its own password, stored as a PBKDF2-SHA512 hash. Anonymous access is off. `make setup` / `lab-up` write one credentials file per lab client (`infra/lab/secrets/`, gitignored).
+- **Topic access.** ACLs are deny-by-default: a device can publish only to `dsn/telemetry/<its own user>` and `home/<its own user>/#`.
+- **Limits.** `mosquitto.conf` caps connection count, packet size, keepalive, and in-flight and queued messages. Mosquitto has no per-client message-rate limit, so floods are detected (`mqtt_connect_flood`) rather than throttled. A host-level new-connection rate limit is in `broker-ratelimit.nft`.
 
-- Shows NORMAL, ALERT and QUARANTINED on an RGB LED.
-- Publishes telemetry.
-- Verifies each command's signature, freshness and replay status before acting, then acks it.
-- Reconnects with jittered backoff.
-- Reads its credentials from NVS. They are entered over serial and never compiled in.
-
-That README covers wiring, flashing and provisioning.
+The backend also tails the broker log: CONNECT, authentication failures, wildcard subscriptions and ACL-denied publishes become behavior events.
 
 ```bash
 make docker-test-mqtt   # integration tests against a real TLS Mosquitto (Docker)
-make firmware-test      # firmware unit tests on the host + esp32dev/esp32dev_ble builds (Docker)
 ```
 
 ## Configuration
@@ -232,8 +240,8 @@ All settings come from environment variables prefixed `DSN_` (see
 ## Layout
 
 ```
-backend/app/{api,core,feeds,intel,graph,detect,behavior,risk,response,mqtt,simulation,models}
-backend/tests   fixtures/   frontend/   firmware/esp32-node/   infra/   docs/   scripts/
+backend/app/{api,core,feeds,intel,graph,detect,behavior,risk,response,mqtt,lab,simulation,models}
+backend/tests   fixtures/   frontend/   infra/ (lab/, mosquitto/)   docs/   scripts/
 ```
 
 ## Docs

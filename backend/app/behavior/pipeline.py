@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -82,6 +82,9 @@ class BehaviorPipeline:
         self.latest: dict[str, WindowResult] = {}
         # Bounded per-device history (risk lookback: IOC contacts, worst window).
         self.history: dict[str, deque[WindowResult]] = defaultdict(lambda: deque(maxlen=HISTORY))
+        # Called with every batch of closed windows, after detections are committed
+        # and published (e.g. the risk engine's IOC-contact check).
+        self.window_listeners: list[Callable[[list[WindowResult]], object]] = []
         self._load_baselines()
 
     # --- baselines -------------------------------------------------------------------
@@ -177,6 +180,11 @@ class BehaviorPipeline:
         for node_id, payload in emitted:
             ts = datetime.fromisoformat(payload["window_end"])
             self.bus.emit("ANOMALY_DETECTED", node_id, ts=ts, **payload)
+        for listener in self.window_listeners:
+            try:
+                listener(results)
+            except Exception:  # a listener bug must never stall ingestion
+                log.exception("window listener failed")
         return results
 
     # --- scoring ---------------------------------------------------------------------

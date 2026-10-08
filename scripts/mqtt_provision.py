@@ -2,17 +2,19 @@
 """Provision the lab MQTT broker: TLS PKI, per-client credentials, device files.
 
     cd backend && uv run python ../scripts/mqtt_provision.py \\
-        --host broker.lab --ip 192.168.50.2 --device esp32-node --device thermo-hall
+        --host mosquitto --ip 10.77.2.10 --device cam-front --device thermo-hall
 
 Writes (all git-ignored, contains secrets):
   infra/mosquitto/certs/ca.crt, ca.key, server.crt, server.key
   infra/mosquitto/passwd                 Mosquitto password file ($7$ PBKDF2-SHA512)
   infra/mosquitto/credentials.json       usernames/passwords + status-node command key
-  firmware/esp32-node/provisioning/<device>.txt   serial commands to load into NVS
+  infra/lab/secrets/<user>.json         one file per virtual lab client (its own
+                                         credentials only; the status node also
+                                         gets the command key)
 
 Idempotent: re-running keeps the CA, the server key and existing passwords and
 adds new devices. ``--rotate`` issues a new CA and new server certificate (all
-devices must then be re-provisioned with the new CA).
+lab clients pick up the new CA on restart).
 
 Users and their ACL roles (infra/mosquitto/config/acl):
   dsn-backend   publishes commands, reads telemetry/acks
@@ -110,7 +112,7 @@ def make_server(certs: Path, ca: x509.Certificate, ca_key: ec.EllipticCurvePriva
 
 
 def provision(out: Path, hosts: list[str], ips: list[str], devices: list[str],
-              rotate: bool = False, firmware_dir: Path | None = None) -> dict[str, object]:
+              rotate: bool = False, device_dir: Path | None = None) -> dict[str, object]:
     certs = out / "certs"
     certs.mkdir(parents=True, exist_ok=True)
     creds_path = out / "credentials.json"
@@ -138,25 +140,14 @@ def provision(out: Path, hosts: list[str], ips: list[str], devices: list[str],
     passwd.write_text("".join(f"{u}:{mosquitto_hash(p)}\n" for u, p in sorted(users.items())),
                       encoding="utf-8")
     passwd.chmod(0o600)
-    if firmware_dir is not None:
-        firmware_dir.mkdir(parents=True, exist_ok=True)
-        ca_pem = (certs / "ca.crt").read_text(encoding="utf-8").strip()
+    if device_dir is not None:
+        device_dir.mkdir(parents=True, exist_ok=True)
         for user in ("status-node", *devices):
-            lines = [
-                "# Paste into the serial console of the ESP32 (115200 baud) in PROVISION mode.",
-                "# Contains secrets: delete after flashing.",
-                "set wifi_ssid <your-lab-ssid>",
-                "set wifi_pass <your-lab-wifi-password>",
-                f"set mqtt_host {hosts[0]}",
-                "set mqtt_port 8883",
-                f"set mqtt_user {user}",
-                f"set mqtt_pass {users[user]}",
-            ]
+            entry: dict[str, str] = {"username": user, "password": users[user]}
             if user == "status-node":
-                lines.append(f"set cmd_key {command_key}")
-            lines += ["ca_begin", ca_pem, "ca_end", "commit"]
-            path = firmware_dir / f"{user}.txt"
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                entry["command_key"] = command_key
+            path = device_dir / f"{user}.json"
+            path.write_text(json.dumps(entry, indent=2), encoding="utf-8")
             path.chmod(0o600)
     return creds
 
@@ -168,13 +159,13 @@ def main() -> None:
     parser.add_argument("--device", action="append", default=[], help="device username")
     parser.add_argument("--out", type=Path, default=MOSQ)
     parser.add_argument("--rotate", action="store_true", help="issue a new CA + server cert")
-    parser.add_argument("--no-firmware", action="store_true",
-                        help="don't write device serial-provisioning files")
+    parser.add_argument("--no-device-files", action="store_true",
+                        help="don't write per-client files for the virtual lab")
     args = parser.parse_args()
     hosts = args.host or ["mosquitto", "localhost"]
-    firmware = None if args.no_firmware else ROOT / "firmware" / "esp32-node" / "provisioning"
+    device_dir = None if args.no_device_files else ROOT / "infra" / "lab" / "secrets"
     creds = provision(args.out, hosts, args.ip or ["127.0.0.1"], args.device, args.rotate,
-                      firmware)
+                      device_dir)
     users = creds["users"]
     assert isinstance(users, dict)
     print(f"provisioned {len(users)} MQTT users in {args.out}")
@@ -182,7 +173,8 @@ def main() -> None:
     print("  DSN_MQTT_USERNAME=dsn-backend")
     print("  DSN_MQTT_PASSWORD=<see infra/mosquitto/credentials.json>")
     print("  DSN_MQTT_COMMAND_KEY=<command_key from the same file>")
-    print("Device serial-provisioning files: firmware/esp32-node/provisioning/")
+    if device_dir is not None:
+        print(f"Virtual lab client files: {device_dir}")
 
 
 if __name__ == "__main__":

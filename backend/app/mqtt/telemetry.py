@@ -4,7 +4,7 @@ Topic ``dsn/telemetry/<username>``. The broker ACL (``pattern write
 dsn/telemetry/%u``) guarantees the publisher *is* <username>, so the topic is
 authenticated identity; the payload is still device-controlled and validated.
 
-Payload (firmware/esp32-node), JSON, <= 2 KiB::
+Payload (virtual lab devices, ``app.lab``), JSON, <= 2 KiB::
 
     {"v": 1, "mac": "24:0a:c4:..", "ip": "192.168.50.24", "fw": "0.1.0",
      "uptime_s": 123, "rssi": -61, "heap": 182000, "state": "NORMAL", "seq": 42}

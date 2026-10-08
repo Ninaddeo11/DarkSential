@@ -9,7 +9,7 @@ topic read dsn/telemetry/#
 topic read dsn/ack/#
 topic read home/#
 
-# ESP32 status node: its command topic only; writes acks.
+# Status node (virtual lab): its command topic only; writes acks.
 user status-node
 topic read dsn/cmd/status-node
 topic write dsn/ack/status-node

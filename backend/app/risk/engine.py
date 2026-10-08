@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.behavior.pipeline import SEVERITY_SCORE, BehaviorPipeline
+from app.behavior.pipeline import SEVERITY_SCORE, BehaviorPipeline, WindowResult
 from app.core.config import Settings
 from app.core.events import Event, EventBus
 from app.detect.registry import DeviceRegistry, DeviceView
@@ -31,6 +31,9 @@ from app.risk.ml import MlExplanation, XgbModel
 from app.risk.scorer import Contribution, score
 
 log = logging.getLogger(__name__)
+
+# Per-device memory of destinations already checked against threat intel.
+SEEN_DESTINATIONS_MAX = 4096
 
 ACTOR_LABELS = {"IntrusionSet", "Campaign"}
 THREAT_LABELS = {"Malware", "Tool", "IntrusionSet", "Campaign"}
@@ -93,8 +96,46 @@ class RiskEngine:
         self.clock = clock
         self._lock = threading.RLock()
         self._last: dict[str, tuple[float, Level, bool]] = {}
+        self._seen_destinations: dict[str, set[str]] = {}
 
     # --- event-driven assessment ----------------------------------------------------
+
+    def on_windows(self, results: list[WindowResult]) -> None:
+        """IOC contact check on closed traffic windows.
+
+        A device contacting a known indicator may show no anomaly at all (one
+        quiet beacon), so waiting for ANOMALY_DETECTED or the periodic re-score
+        would delay the decision by up to 15 minutes. Only destinations not seen
+        before for that device are looked up, so steady traffic costs nothing.
+        Indicators added *later* for an old destination are picked up by the
+        periodic re-score.
+        """
+        hits: dict[str, tuple[datetime, list[dict[str, Any]]]] = {}
+        for r in results:
+            seen = self._seen_destinations.setdefault(r.node_id, set())
+            fresh = [d for d in r.destinations if d not in seen]
+            if len(seen) + len(fresh) > SEEN_DESTINATIONS_MAX:
+                seen.clear()  # bounded memory; worst case is a repeat lookup
+            seen.update(fresh)
+            for dest in fresh:
+                if _is_lab_internal(dest, self.settings):
+                    continue
+                indicators = self.graph.indicators_for(dest)
+                if indicators:
+                    _, found = hits.setdefault(r.node_id, (r.window_end, []))
+                    found.append(
+                        {
+                            "destination": dest,
+                            "indicators": [i["id"] for i in indicators][:5],
+                            "sources": sorted(
+                                {s for i in indicators for s in i.get("sources") or []}
+                            ),
+                        }
+                    )
+        for node_id, (ts, found) in hits.items():
+            log.info("new IOC contact", extra={"node_id": node_id, "contacts": found})
+            # assess() emits THREAT_CORRELATED (and RISK_UPDATED) itself.
+            self.assess(node_id, trigger="IOC_CONTACT", now=ts)
 
     def on_event(self, event: Event) -> None:
         if event.type in {"DEVICE_CONNECTED", "DEVICE_PROFILED", "ANOMALY_DETECTED"} and (

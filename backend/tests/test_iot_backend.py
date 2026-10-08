@@ -210,9 +210,9 @@ def test_provisioning_pki_and_passwords(provision_mod: Any, tmp_path: Path) -> N
     from cryptography import x509
     from cryptography.hazmat.primitives.asymmetric import ec
 
-    fw = tmp_path / "fw"
+    dev_dir = tmp_path / "lab"
     creds = provision_mod.provision(
-        tmp_path, ["mosquitto", "broker.lab"], ["192.168.50.2"], ["esp32-node"], firmware_dir=fw
+        tmp_path, ["mosquitto", "broker.lab"], ["192.168.50.2"], ["esp32-node"], device_dir=dev_dir
     )
     ca = x509.load_pem_x509_certificate((tmp_path / "certs" / "ca.crt").read_bytes())
     server = x509.load_pem_x509_certificate((tmp_path / "certs" / "server.crt").read_bytes())
@@ -232,11 +232,11 @@ def test_provisioning_pki_and_passwords(provision_mod: Any, tmp_path: Path) -> N
             "sha512", users[user].encode(), base64.b64decode(salt), int(iters), dklen=64
         )
         assert base64.b64decode(digest) == recomputed
-    device_file = (fw / "esp32-node.txt").read_text()
-    assert users["esp32-node"] in device_file
-    assert users["dsn-backend"] not in device_file  # no other client's secret
-    assert "cmd_key" not in device_file  # only the status node gets the command key
-    assert creds["command_key"] in (fw / "status-node.txt").read_text()
+    device_file = json.loads((dev_dir / "esp32-node.json").read_text())
+    assert device_file == {"username": "esp32-node", "password": users["esp32-node"]}
+    assert not (dev_dir / "dsn-backend.json").exists()  # the backend's secret stays in .env
+    node_file = json.loads((dev_dir / "status-node.json").read_text())
+    assert node_file["command_key"] == creds["command_key"]  # only the status node has it
     # Idempotent: same CA and passwords on re-run; new devices are added.
     again = provision_mod.provision(
         tmp_path, ["mosquitto"], ["192.168.50.2"], ["esp32-node", "thermo-hall"]

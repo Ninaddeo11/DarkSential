@@ -121,6 +121,31 @@ def test_ioc_contact_correlates_threat(rt: LabRuntime) -> None:
     assert not any(e.kind == "ioc" and "192.168.50." in e.summary for e in intel.evidence)
 
 
+def test_quiet_ioc_contact_is_assessed_immediately(rt: LabRuntime) -> None:
+    # One beacon, no anomaly, no rule hit: must not wait for the 15 min re-score.
+    esp = node(rt, ESP)
+    before = len(rt.risk.history(esp))
+    ev = TrafficEvent(
+        ts=START + timedelta(seconds=5),
+        src_mac="24:0a:c4:40:00:04",
+        src_ip=ESP,
+        dst_ip=FEODO_C2,
+        dst_port=8080,
+        proto="tcp",
+    )
+    rt.pipeline.ingest([ev])
+    rt.pipeline.flush()
+    history = rt.risk.history(esp)
+    assert len(history) == before + 1
+    assert history[0]["trigger"] == "IOC_CONTACT"
+    intel = next(f for f in history[0]["factors"] if f["name"] == "threat_intel")
+    assert FEODO_C2 in intel["summary"]
+    # The same destination again is not looked up or re-assessed.
+    rt.pipeline.ingest([ev.model_copy(update={"ts": START + timedelta(minutes=2)})])
+    rt.pipeline.flush()
+    assert len(rt.risk.history(esp)) == before + 1
+
+
 def test_unknown_vs_approved_device(rt: LabRuntime) -> None:
     plug = node(rt, "192.168.50.23")
     before = rt.risk.assess(plug, now=START)

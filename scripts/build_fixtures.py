@@ -37,6 +37,7 @@ CVES = [
     "CVE-2017-17215",  # Huawei HG532 RCE (Satori/Mirai) - not in KEV
     "CVE-2014-8361",  # Realtek SDK miniigd UPnP RCE
     "CVE-2021-44228",  # Log4Shell
+    "CVE-2017-17562",  # Embedthis GoAhead < 3.6.5 RCE (virtual lab "cam-yard")
 ]
 
 # ATT&CK objects relevant to IoT/MQTT behavior detection, by external ID or name.

@@ -450,8 +450,9 @@ def demo_phase4(settings: Settings) -> None:
 
 def demo_phase5(settings: Settings) -> None:
     from app.core.config import REPO_ROOT
+    from app.lab.status_node import StatusNodeLogic
     from app.mqtt.brokerlog import BrokerLogParser, tail_once
-    from app.mqtt.commands import COMMAND_TOPIC, NullPublisher, verify
+    from app.mqtt.commands import COMMAND_TOPIC, NullPublisher
 
     key = "demo-status-node-key-0123456789abcdef"
     tmp = Path(tempfile.mkdtemp(prefix="dsn-demo5-"))
@@ -497,20 +498,13 @@ def demo_phase5(settings: Settings) -> None:
             attrs = {k: device.attributes.get(k) for k in ("mqtt_user", "fw", "rssi", "state")}
             print(f"   registry: {device.node_id} ip={device.ip} {attrs}")
 
-        print("\n== 2. Signed status-node commands, checked the way the firmware checks them")
-        print("   (reference emulation in Python; the C++ verifier itself: pio test -e native)")
+        print("\n== 2. Signed status-node commands, checked by the virtual status node")
+        print("   (app.lab.status_node: the same code the lab's status-node container runs)")
         commander = rt.response.commander
-        seen: set[str] = set()
+        status_node = StatusNodeLogic(key.encode())
 
         def node_verdict(cmd: dict[str, Any], now: int) -> str:
-            if not verify(cmd, key.encode()):
-                return "bad_sig"
-            if abs(now - int(cmd["ts"])) > min(max(int(cmd["ttl"]), 1), 300):
-                return "stale"
-            if cmd["id"] in seen:
-                return "replay"
-            seen.add(cmd["id"])
-            return "ok"
+            return status_node.handle(json.dumps(cmd).encode(), now)[1]
 
         sent = commander.send("QUARANTINE", node or "", "critical")
         wire = json.loads(publisher.sent[-1][1])

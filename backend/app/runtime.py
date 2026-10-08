@@ -203,6 +203,7 @@ class LabRuntime:
             ml=load_or_train_xgb(settings, behavior_cfg),
         )
         bus.subscribe(risk.on_event)
+        pipeline.window_listeners.append(risk.on_windows)
         audit = AuditLog(sessions)
         driver, response_error = _build_driver(settings)
         holder: dict[str, ResponseService] = {}
@@ -333,7 +334,11 @@ class LabRuntime:
         if caps["passive"].active:
             from app.detect.passive import PassiveObserver
 
-            svc: Any = PassiveObserver(self.registry.observe, self.settings.passive_capture_iface)
+            svc: Any = PassiveObserver(
+                self.registry.observe,
+                self.settings.passive_capture_iface,
+                self.pipeline.ingest if self.settings.passive_capture_traffic else None,
+            )
             svc.start()
             self._services.append(svc)
         if caps["ble"].active:

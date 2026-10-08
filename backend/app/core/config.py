@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     nmap_enabled: bool = False
     passive_capture_enabled: bool = False
     passive_capture_iface: str | None = None
+    # Also turn captured IP packets into behavior TrafficEvents (gateway position,
+    # e.g. the virtual lab router). Listen-only, like the rest of passive capture.
+    passive_capture_traffic: bool = False
     ble_scan_enabled: bool = False
     # Wi-Fi management-frame monitoring needs a monitor-mode interface and
     # DSN_DRY_RUN=false (it is treated like scanning).

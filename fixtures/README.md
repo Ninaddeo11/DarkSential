@@ -5,8 +5,8 @@ through the **real** feed parsers.
 
 | File | Source | Kind | Built |
 |---|---|---|---|
-| `kev/kev.sample.json` | CISA KEV catalog (subset: 4 IoT/edge CVEs + Log4Shell) | real | `scripts/build_fixtures.py`, 2026-10-02 |
-| `nvd/nvd.sample.json` | NVD CVE API 2.0 (5 CVEs, one not in KEV) | real | same |
+| `kev/kev.sample.json` | CISA KEV catalog (subset: 4 IoT/edge CVEs + Log4Shell; CVE-2017-17562 added for the virtual lab) | real | `scripts/build_fixtures.py`, 2026-10-02; CVE-2017-17562 merged 2026-10-08 |
+| `nvd/nvd.sample.json` | NVD CVE API 2.0 (6 CVEs, one not in KEV) | real | same |
 | `attack/attack.sample.json` | MITRE ATT&CK enterprise + ICS bundles (IoT-relevant techniques, 7 software, 2 groups, their relationships, 1 revoked object) | real | same |
 | `feodo/ipblocklist.sample.json` | Feodo Tracker IP blocklist (the live feed had 5 entries) | real | same |
 | `urlhaus/urls_recent.sample.json` | URLhaus `/urls/recent/` shape per docs | **synthetic** | hand-written |

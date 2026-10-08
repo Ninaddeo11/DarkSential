@@ -3,20 +3,33 @@
 ``observation_from_packet`` is a pure function over scapy packets, so it is
 fully testable with crafted packets. ``PassiveObserver`` wraps scapy's
 AsyncSniffer and starts only when enabled and the host has capture rights.
+
+With a traffic sink (``DSN_PASSIVE_CAPTURE_TRAFFIC``, e.g. on the virtual lab's
+gateway) the same sniffer also turns every IP packet into ``TrafficEvent``s via
+``events_from_packets``, batched so the behavior pipeline takes one lock per
+batch rather than per packet.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.core.identifiers import normalize_mac
 from app.detect.observations import Observation
 
+if TYPE_CHECKING:
+    from app.behavior.events import TrafficEvent
+
 log = logging.getLogger(__name__)
 
 BPF_FILTER = "arp or (udp and (port 67 or port 68 or port 5353))"
+TRAFFIC_BPF_FILTER = "arp or ip"
+TRAFFIC_BATCH_SECONDS = 1.0
+TRAFFIC_BATCH_MAX = 500
 _MDNS_PORT = 5353
 _DNS_A, _DNS_PTR, _DNS_SRV = 1, 12, 33
 UNSPECIFIED = "0.0.0.0"  # noqa: S104 - compared against, never bound
@@ -120,30 +133,111 @@ def _records(section: Any) -> list[Any]:
 
 
 class PassiveObserver:
-    def __init__(self, on_observation: Callable[[Observation], object], iface: str | None) -> None:
+    def __init__(
+        self,
+        on_observation: Callable[[Observation], object],
+        iface: str | None,
+        on_traffic: Callable[[list[TrafficEvent]], object] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        ignore_ips: frozenset[str] | None = None,
+    ) -> None:
         self._on = on_observation
+        # This host's own addresses: DSN must not profile itself (e.g. its own
+        # nmap scans seen on the capture interface). None = resolve at start().
+        self._ignore: frozenset[str] = ignore_ips or frozenset()
+        self._resolve_ignore = ignore_ips is None
         self._iface = iface
+        self._on_traffic = on_traffic
+        self._clock = clock
         self._sniffer: Any = None
+        self._batch: list[TrafficEvent] = []
+        self._batch_started = 0.0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._flusher: threading.Thread | None = None
 
     def _handle(self, pkt: Any) -> None:
         try:
             obs = observation_from_packet(pkt)
         except Exception:  # malformed packets must never kill the sniffer
             log.debug("unparseable packet", exc_info=True)
-            return
-        if obs is not None:
+            obs = None
+        if obs is not None and obs.ip not in self._ignore:
             self._on(obs)
+        if self._on_traffic is not None:
+            self._collect(pkt)
+
+    def _collect(self, pkt: Any) -> None:
+        from app.behavior.pcap import events_from_packets
+
+        try:
+            events = list(events_from_packets([pkt]))
+        except Exception:
+            log.debug("unparseable packet", exc_info=True)
+            return
+        events = [e for e in events if e.src_ip not in self._ignore]
+        with self._lock:
+            if events and not self._batch:
+                self._batch_started = self._clock()
+            self._batch.extend(events)
+            due = self._batch and (
+                len(self._batch) >= TRAFFIC_BATCH_MAX
+                or self._clock() - self._batch_started >= TRAFFIC_BATCH_SECONDS
+            )
+        if due:
+            self.flush()
+
+    def flush(self) -> None:
+        with self._lock:
+            batch, self._batch = self._batch, []
+        if batch and self._on_traffic is not None:
+            self._on_traffic(batch)
 
     def start(self) -> None:
+        # Importing the layer modules registers their link-type bindings (Ethernet
+        # for ARPHRD_ETHER, IP/TCP/UDP, DNS). Without them a live socket can't
+        # decode frames and hands back raw ``Packet``s ("Unable to guess type"),
+        # which every parser here silently ignores.
+        import scapy.layers.dns
+        import scapy.layers.inet
+        import scapy.layers.l2  # noqa: F401
         from scapy.sendrecv import AsyncSniffer
 
-        self._sniffer = AsyncSniffer(
-            iface=self._iface, filter=BPF_FILTER, prn=self._handle, store=False
-        )
+        if self._resolve_ignore and self._iface:
+            from scapy.arch import get_if_addr
+
+            try:
+                own = get_if_addr(self._iface)
+            except Exception:  # unknown iface: capture still starts, nothing ignored
+                log.warning("cannot resolve capture interface address", exc_info=True)
+                own = UNSPECIFIED
+            self._ignore = frozenset({own} - {UNSPECIFIED})
+        bpf = TRAFFIC_BPF_FILTER if self._on_traffic is not None else BPF_FILTER
+        self._sniffer = AsyncSniffer(iface=self._iface, filter=bpf, prn=self._handle, store=False)
         self._sniffer.start()
-        log.info("passive capture started", extra={"iface": self._iface})
+        if self._on_traffic is not None:
+            # Quiet periods must not strand a partial batch (detection latency).
+            self._stop.clear()
+            self._flusher = threading.Thread(target=self._flush_loop, daemon=True)
+            self._flusher.start()
+        log.info(
+            "passive capture started",
+            extra={"iface": self._iface, "traffic": self._on_traffic is not None},
+        )
+
+    def _flush_loop(self) -> None:
+        while not self._stop.wait(TRAFFIC_BATCH_SECONDS):
+            try:
+                self.flush()
+            except Exception:
+                log.exception("traffic batch flush failed")
 
     def stop(self) -> None:
+        self._stop.set()
         if self._sniffer is not None:
             self._sniffer.stop()
             self._sniffer = None
+        if self._flusher is not None:
+            self._flusher.join(timeout=5)
+            self._flusher = None
+        self.flush()

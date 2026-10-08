@@ -79,6 +79,12 @@ jobs:
         run: |
           cp .env.example .env
           docker compose --env-file .env -f infra/docker-compose.yml config --quiet
+          docker compose --env-file .env -f infra/docker-compose.yml \
+            -f infra/docker-compose.lab.yml config --quiet
+          docker compose --env-file .env -f infra/docker-compose.yml \
+            -f infra/docker-compose.gateway.yml config --quiet
+      - name: shell scripts parse
+        run: for f in infra/lab/*.sh infra/mosquitto/entrypoint.sh; do sh -n "$f"; done
 
   enforcement:
     # Driver tests against REAL nftables, in a container with only CAP_NET_ADMIN.
@@ -113,7 +119,7 @@ jobs:
       - name: provision broker PKI + credentials
         run: |
           uv run python ../scripts/mqtt_provision.py --out data/mqtt-it --host localhost \
-            --device esp32-node --device rogue-sensor --no-firmware
+            --device esp32-node --device rogue-sensor --no-device-files
           mkdir -p data/mqtt-it/log
       - name: start mosquitto
         run: |
@@ -135,25 +141,26 @@ jobs:
       - if: always()
         run: docker logs mosq | tail -20
 
-  firmware:
-    # ESP32 firmware: host unit tests for the security logic + both device builds.
+  lab:
+    # The virtual IoT lab end to end: real broker, gateway capture, nmap, intel.
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: firmware/esp32-node
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v6
-        with:
-          path: ~/.platformio
-          key: pio-${{ hashFiles('firmware/esp32-node/platformio.ini') }}
       - uses: astral-sh/setup-uv@v10.2.0  # publishes full version tags only
         with:
           version: "0.12.17"
-          python-version: "3.12"
-      - run: uv tool install platformio==6.2.0
-      - run: pio test -e native
-      - run: pio run -e esp32dev -e esp32dev_ble
+          python-version: "3.13"
+      - run: uv sync --frozen --extra lab
+        working-directory: backend
+      - run: python scripts/tasks.py lab-up
+      - run: python scripts/lab_smoke.py
+      - if: failure()
+        run: |
+          docker compose --env-file .env -f infra/docker-compose.yml \
+            -f infra/docker-compose.lab.yml logs --tail 60 backend mosquitto plug-lab sensor-gate
+      - if: always()
+        run: python scripts/tasks.py lab-down
 
   demo:
     runs-on: ubuntu-latest

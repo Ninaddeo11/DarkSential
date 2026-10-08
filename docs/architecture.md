@@ -33,8 +33,8 @@ Status markers: ✅ implemented · ⏳ planned (phase noted).
 └───────▲──────┘    └──────────────┘        └──────────────────┘
         │ MQTT/TLS
 ┌───────┴──────┐
-│ ESP32 status │  RGB LED: NORMAL / ALERT / QUARANTINED   ✅P5
-│ node         │
+│ virtual lab  │  IoT devices + status node (NORMAL/ALERT/QUARANTINED) ✅P5
+│ (containers) │
 └──────────────┘
 ```
 
@@ -422,7 +422,7 @@ first bad id. Actors include `system:risk-engine`, `system:auto-recovery`,
 
 **MQTT status node.** Commands go to `dsn/cmd/status-node`:
 `{id, ts, cmd, node_id, level, ttl, sig}` with `sig = HMAC-SHA256(DSN_MQTT_COMMAND_KEY,
-"id|ts|cmd|node_id|level|ttl")`. The firmware (Phase 5) checks signature, TTL and replay. Acks
+"id|ts|cmd|node_id|level|ttl")`. The status node (Phase 5, `app.lab.status_node`) checks signature, TTL and replay. Acks
 on `dsn/ack/status-node` are audited and never gate enforcement. A broker
 outage never blocks a quarantine. The client is paho-mqtt v2 with TLS
 (certificate and hostname verified), credentials, and reconnect backoff up to
@@ -451,31 +451,91 @@ runs as an unprivileged user.
   configuration and the driver against real nftables, not on a physical
   gateway in this environment.
 
-## Phase 5: IoT layer (broker + ESP32)
+## Phase 5: IoT layer (broker + virtual lab)
+
+The project runs entirely in software. Physical devices are replaced by a
+**virtual lab**: IoT devices, a status node and scripted misbehavior, each in its
+own container, routed through a gateway that captures and really enforces.
 
 ```
-ESP32 (TLS, own user) ── dsn/telemetry/<user> ──► Mosquitto ──► backend TelemetryConsumer
-        ▲                                            │  (validate → Observation → registry;
-        │ dsn/cmd/status-node (HMAC-signed)          │   → TrafficEvent if no broker log)
-        └──────────────── backend ◄── dsn/ack/... ───┤
-                                                     └─ mosquitto.log ──► BrokerLogTailer
-                                                        CONNECT / not authorised / SUBSCRIBE /
-                                                        Denied PUBLISH → TrafficEvent → pipeline
+lab-devices 10.77.1.0/24                                   lab-services 10.77.2.0/24
+ cam-front .71   cam-yard .72 (GoAhead 3.6.4)    ┌───────────────────────┐
+ thermo-hall .73 plug-lab .74                    │ backend = lab gateway │      mosquitto .10
+ sensor-gate .75 status-node .80   ── only ───►  │ .1.2            .2.2  │ ◄──► (TLS 8883)
+ rogue-sensor .99 (on demand)      route         │ capture → pipeline    │
+                                                 │ nmap 10.77.1.64/26    │
+                                                 │ nftables: quarantine  │
+                                                 │  + egress lock        │
+                                                 └───────────────────────┘
 ```
+
+**Why route everything through the backend.** Quarantine is IP-based at the
+gateway (Phase 4). For it to bite, the device's traffic has to cross the
+gateway, so the lab puts devices and broker on different subnets. The backend
+container joins both, forwards between them (`net.ipv4.ip_forward=1`), sniffs
+the device-facing interface (`DSN_PASSIVE_CAPTURE_TRAFFIC`: every IP packet
+becomes a `TrafficEvent`) and runs the nftables driver for real
+(`DSN_DRY_RUN=false`). Its rules live in the backend container's own network
+namespace, so enforcement is real but confined to the sandbox.
+
+**Isolation.** Docker's `internal` flag can't be used: the host bridge drops
+routed packets whose destination is outside the bridge's subnet. Isolation comes
+from routing instead:
+
+- `infra/lab/lab-entry.sh` (as root, briefly) removes the on-link subnet route
+  and leaves only `gateway/32` + `default via gateway`. Other devices and the
+  Docker host bridge (`.1`) are therefore only reachable *through* the gateway.
+  It then drops to uid 10001 with an empty capability set (`setpriv`), so the
+  client cannot change its routes (verified: `RTNETLINK ... Operation not
+  permitted`; `CapEff` = 0).
+- `infra/lab/gateway-entry.sh` installs an **egress lock** (`inet dsn_lab`)
+  before the app starts and fails closed if it can't: only device ↔ broker
+  subnet traffic is forwarded; everything else from the devices (a "C2
+  beacon", device-to-device, the host) is captured on ingress and dropped.
+- Lab clients get `dns: [127.0.0.1]`, so Docker's embedded DNS can't forward
+  outside names for them; the C2 beacon only accepts IP literals.
+- The gateway app runs as `dsn` with only `NET_ADMIN` + `NET_RAW` as ambient
+  capabilities. `DSN_LAB_CIDR` is `10.77.1.64/26` (lab clients only), so
+  scans and quarantines can never target the host bridge or the gateway.
+
+**Lab clients** (`backend/app/lab`, image `infra/lab/client.Dockerfile`, which
+contains only `app.lab` and the command contract, no backend settings or secrets):
+
+- `device --profile camera|vulncam|thermostat|plug|sensor`: seeded payloads on
+  `home/<user>/…`, telemetry every 10 s, and TCP service banners for nmap.
+  `vulncam` answers as `GoAhead-Webs/3.6.4`; nmap reports GoAhead 3.6.4, the
+  fingerprint table maps it to `cpe:2.3:a:embedthis:goahead:3.6.4`, and NVD
+  marks `< 3.6.5` vulnerable to CVE-2017-17562 (CISA KEV). The fixture records
+  for that CVE are the real KEV/NVD entries (merged by `build_fixtures.py`).
+- `status-node`: verifies signed commands exactly as `app.mqtt.commands`
+  specifies (charset, HMAC in constant time, `|now − ts| ≤ ttl` with ttl ≤ 300 s,
+  replay memory of 256 ids, only accepted ids remembered), acks, and publishes
+  its state (NORMAL / ALERT / QUARANTINED) in telemetry for the dashboard.
+- `attack flood|wildcard|restricted|bad-auth|c2`: signals for the detection
+  scenarios. Not exploits: they use the device's own (or a wrong) password
+  against the lab broker, or open TCP connections the gateway drops. All refuse
+  to run without `DSN_LAB_SANDBOX=1` and a private broker address.
+
+**IOC contact triggers assessment.** Risk was assessed on DEVICE_CONNECTED /
+PROFILED / ANOMALY_DETECTED and every 15 min. The lab exposed the gap: a quiet
+device beaconing once to a C2 address (no anomaly) waited up to 15 min. The
+pipeline now calls window listeners after each batch; the risk engine looks up
+destinations it hasn't seen before for that device and re-assesses at once
+(`trigger = IOC_CONTACT`) when one is a known indicator.
 
 **Broker.** eclipse-mosquitto 2.0.22, configured as follows:
 
-- **Listener.** A single TLS listener on 8883, using a lab CA with EC P-256 keys. The server certificate's SANs cover the hostnames and IPs passed to `mqtt_provision.py`.
-- **Accounts.** `allow_anonymous false`, with `$7$` PBKDF2-SHA512 password hashes.
+- **Listener.** A single TLS listener on 8883, using a lab CA with EC P-256 keys. The server certificate's SANs cover the hostnames and IPs passed to `mqtt_provision.py` (the lab adds `10.77.2.10`).
+- **Accounts.** `allow_anonymous false`, with `$7$` PBKDF2-SHA512 password hashes. `mqtt_provision.py` writes one credentials file per lab client (`infra/lab/secrets/<user>.json`, gitignored); only the status node's file holds the command key.
 - **ACLs.** Deny by default. Patterns bind each device to `dsn/telemetry/%u`, `home/%u/#` and `dsn/config/%u`.
   - `dsn-backend` alone writes `dsn/cmd/#`.
   - `status-node` alone reads its command topic and writes its ack topic.
-- **Secret files.** An entrypoint copies the secrets into `/mosquitto/secure` with `mosquitto:0600` ownership, so the broker starts without permission warnings.
+- **Secret files.** An entrypoint copies the secrets into `/mosquitto/secure` with `mosquitto:0600` ownership, so the broker starts without permission warnings. The log is pre-created `0640 mosquitto:<LOG_READER_GID>` so the non-root backend can tail it. In the lab, `LAB_ROUTE` adds the route to the device subnet via the gateway, so the broker sees real device IPs.
 - **Rate limiting.** Mosquitto has no per-client message-rate limit. Instead:
   - Host-level `broker-ratelimit.nft` drops sources that open more than 30 new connections a minute, for 5 minutes.
   - Message floods are a detection case (`mqtt_connect_flood`).
 
-**Broker log as a sensor.** With TLS, pcaps can't see MQTT packets, so the broker log is the only place that sees every CONNECT, authentication failure, SUBSCRIBE and denied PUBLISH:
+**Broker log as a sensor.** With TLS, packet capture can't see MQTT packets, so the broker log is the only place that sees every CONNECT, authentication failure, SUBSCRIBE and denied PUBLISH:
 
 - `BrokerLogParser` maps client ids to IPs, using the preceding "New connection" line for refused sockets.
 - It ignores the configured service clients (`DSN_MQTT_SERVICE_CLIENTS`), so the backend's own `#` subscriptions don't trip rules.
@@ -491,25 +551,20 @@ The formats were captured from a real broker (`fixtures/events/mosquitto.sample.
 - The MAC is a device-asserted claim.
 - When no broker log is configured, telemetry also produces PUBLISH traffic events.
 
-**Firmware** (`firmware/esp32-node`, PlatformIO, Arduino on espressif32 7.1.3):
-
-- **Portable core.** `lib/dsn_core` contains SHA-256/HMAC, command parsing and verification, the LED state machine, the provisioning parser, backoff and telemetry JSON. It has no Arduino dependency and is unit-tested on the host, including the command vector shared with the backend tests.
-- **Arduino glue.** `src/main.cpp` handles:
-  - NVS and the serial provisioning console
-  - WiFi
-  - MQTT over TLS (PubSubClient; the server is verified against the lab CA)
-  - NTP
-  - LEDC PWM
-  - an optional read-only BLE GATT service
-- **Reconnects.** Exponential backoff with full jitter, from 1 s up to 60 s.
-
 ### Known limitations (Phase 5)
 
-- **Firmware untested on hardware.** It compiles and its logic passes host tests, but it has not been run on a physical ESP32 here, so the WiFi/TLS/NVS paths are unverified on silicon.
+- **Simulated devices.** Device behavior is generated, not recorded from real
+  products; banners imitate products for fingerprinting and contain no
+  vulnerable code. Results measured in the lab say how DSN reacts to these
+  signals, not how often real devices emit them.
 - **No mutual TLS.** Devices authenticate with passwords; they do not present client certificates.
-- **Replay cache lost on reboot.** The firmware's replay cache lives in RAM; after a reboot only the ≤ 300 s staleness window protects.
-- **NAT hides device IPs.** If clients reach the broker through NAT (e.g. Docker port publishing), the broker log shows the NAT address, so all of their activity is attributed to one source. The sample fixture shows this. Bind the broker on the lab interface (`DSN_MQTT_BIND`) or use host networking so it sees real device IPs.
+- **Status-node replay memory is in RAM.** After a restart only the ≤ 300 s staleness window protects.
+- **Not internet-isolated by Docker.** The lab networks are ordinary bridges;
+  isolation relies on the routing lock, dropped capabilities and the gateway's
+  egress lock (all verified), not on Docker's `internal` flag.
+- **NAT hides device IPs** outside the lab: if clients reach the broker through NAT (e.g. Docker port publishing), the broker log shows the NAT address. The lab avoids this by routing.
 - **No message-rate limit.** There is no per-client message-rate limit at the broker (see above).
+- **Indicators added later** for a destination a device already contacted are picked up by the 15-min re-score, not immediately.
 
 ## Key design decisions
 

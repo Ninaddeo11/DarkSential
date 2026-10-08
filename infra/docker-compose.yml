@@ -20,8 +20,8 @@ services:
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
     ports:
-      # TLS only. Bind to the lab-facing interface so ESP32 nodes can reach it
-      # (DSN_MQTT_BIND=192.168.50.2); localhost by default.
+      # TLS only, localhost by default. Virtual lab clients use the internal
+      # lab network (infra/docker-compose.lab.yml).
       - "${DSN_MQTT_BIND:-127.0.0.1}:8883:8883"
     networks: [backplane]
     healthcheck:

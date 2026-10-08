@@ -53,7 +53,9 @@ def test_kev_fixture(settings: Settings) -> None:
     assert isinstance(adapter, MockAdapter)
     objs, rejected = objects_of(adapter)
     assert rejected == []
-    assert by_type(objs) == {"vulnerability": 4}
+    assert by_type(objs) == {"vulnerability": 5}
+    goahead = next(o for o in objs if o["name"] == "CVE-2017-17562")  # virtual lab cam-yard
+    assert goahead["x_dsn_kev"]["date_added"] == "2021-12-10"
     tplink = next(o for o in objs if o["name"] == "CVE-2023-1389")
     assert tplink["id"] == stix_id("vulnerability", "CVE-2023-1389")
     assert tplink["x_dsn_kev"]["date_added"] == "2023-05-01"
@@ -70,7 +72,12 @@ def test_nvd_fixture(settings: Settings) -> None:
         "CVE-2017-17215",
         "CVE-2014-8361",
         "CVE-2021-44228",
+        "CVE-2017-17562",
     }
+    goahead = next(o for o in objs if o["name"] == "CVE-2017-17562")
+    match = goahead["x_dsn_cpe_matches"][0]
+    assert match["criteria"].startswith("cpe:2.3:a:embedthis:goahead:*")
+    assert match["version_end_excluding"] == "3.6.5"
     log4j = next(o for o in objs if o["name"] == "CVE-2021-44228")
     assert log4j["x_dsn_cvss"]["base_score"] == 10.0
     assert log4j["x_dsn_kev"]["date_added"]  # NVD carries CISA KEV fields too
@@ -264,7 +271,7 @@ def test_live_kev_fetch(settings: Settings, tmp_path: Path) -> None:
         return httpx2.Response(200, json=fixture_json("kev/kev.sample.json"))
 
     adapter = live(CisaKevAdapter, settings, "cisa_kev", handler, tmp_path)
-    assert len(adapter.normalize_to_stix(adapter.fetch()).objects) == 4
+    assert len(adapter.normalize_to_stix(adapter.fetch()).objects) == 5
 
 
 def test_live_nvd_paginates_with_api_key(make_settings: SettingsFactory, tmp_path: Path) -> None:
@@ -281,7 +288,7 @@ def test_live_nvd_paginates_with_api_key(make_settings: SettingsFactory, tmp_pat
 
     adapter = live(NvdCveAdapter, s, "nvd_cve", handler, tmp_path)
     raw = adapter.fetch()
-    assert len(raw["vulnerabilities"]) == 5
+    assert len(raw["vulnerabilities"]) == 6
     assert [r.url.params["startIndex"] for r in requests] == ["0", "2", "4"]
     assert all(r.headers["apiKey"] == "nvd-test-key" for r in requests)
     params = requests[0].url.params

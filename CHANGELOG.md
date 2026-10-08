@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.7.0] Pure-software lab: virtual IoT devices replace hardware, 2026-10-08
+
+### Changed
+- **The ESP32 firmware and all hardware dependencies are removed.** The
+  project now runs entirely in software.
+- `mqtt_provision.py` writes per-client JSON credential files for the virtual
+  lab (`infra/lab/secrets/`) instead of serial provisioning files.
+  `--no-firmware` is now `--no-device-files`.
+
+### Added
+- **Virtual lab** (`make lab-up`, `infra/docker-compose.lab.yml`). Lab clients are built from `backend/app/lab`:
+  - 5 simulated IoT devices (cameras, thermostat, smart plug, air sensor);
+  - a virtual status node;
+  - an on-demand rogue device.
+
+  The backend container is the lab gateway: it routes, captures, scans and enforces with real nftables, confined to its own network namespace.
+- **Isolation by routing.** Each lab client is left with a single route via the gateway, then drops every capability. The gateway's egress lock fails closed and forwards only device ↔ broker traffic. Lab clients cannot resolve outside names.
+- **Scenarios** (`lab-attack`): `flood`, `wildcard`, `restricted`, `bad-auth`, `c2` and `rogue`, optionally on a chosen device. All refuse to run outside the sandbox.
+- **Live traffic capture** (`DSN_PASSIVE_CAPTURE_TRAFFIC`). The passive sniffer also emits `TrafficEvent`s, batched with a 1 s flush, and ignores the capturing host's own address.
+- **`cam-yard` answers as GoAhead 3.6.4.** nmap fingerprints it and it links to CVE-2017-17562 (CISA KEV). The real KEV and NVD records were added to the fixtures.
+- **`lab-smoke` and a CI job `lab`:** discovery, the KEV link and the IOC-contact re-score, run end to end. CI also validates the lab and gateway compose files and parses the shell scripts.
+
+### Fixed / found by running the lab
+- **Live packet capture never decoded a frame.** The app imported only some scapy modules, so live sockets had no Ethernet binding, and every packet came back raw and was silently dropped. This also affected passive ARP/DHCP/mDNS discovery on real deployments. `start()` now registers the layers, and a regression test runs in a fresh interpreter.
+- **A quiet C2 contact waited up to 15 min to be scored.** Risk was assessed only on anomalies and on the periodic re-score. Closed traffic windows now trigger an immediate assessment (`trigger = IOC_CONTACT`) when a device contacts a new known indicator. Measured in the lab: 10 → 42.8 for the smart plug after one beacon.
+- **The gateway profiled itself.** Its own nmap probes were captured as "device traffic" and flagged as an anomaly. The capturing host's address is now ignored.
+
+### Measured in the lab (2026-10-08, one run each)
+- **Flood scenario:** 1,000 TLS connects in 2 min, measured at 497/min. The `mqtt_connect_flood` rule fired.
+- **Flood plus C2 contact:** 42.8 / 100 (medium → alert). With the default thresholds this does **not** auto-quarantine. Automatic quarantine needs *critical*, and the Phase 4 demo lowered its thresholds to show it. Threshold calibration is left to Phase 7, against measured false-positive rates.
+- **Operator quarantine of the plug (3 min):**
+  - the nft set held 10.77.1.74;
+  - the plug ↔ broker connection timed out while other devices were unaffected;
+  - the status node showed QUARANTINED;
+  - auto-recovery released it 22 s after expiry;
+  - the plug reconnected 51 s later.
+
+### Known limitations
+- **Device behavior is simulated.** Banners imitate products for fingerprinting only; there is no vulnerable code.
+- **Lab isolation depends on routing.** It relies on the routing lock, dropped capabilities and the egress lock, not on Docker's `internal` flag. The `internal` flag drops routed lab traffic on the host bridge.
+
 ## [0.6.0] Phase 5: IoT layer (Mosquitto + ESP32), 2026-10-08
 
 ### Added
