@@ -504,7 +504,9 @@ def demo_phase0() -> None:
     proc = _spawn(["uv", "run", "python", "-m", "app"], BACKEND, env)
     try:
         base = f"http://127.0.0.1:{port}"
-        for _ in range(60):
+        # Startup trains the Isolation Forest and XGBoost models (and, on a fresh
+        # machine, builds matplotlib's font cache): ~14 s on a CI runner.
+        for _ in range(240):
             try:
                 _get(f"{base}/api/health")
                 break
@@ -513,7 +515,7 @@ def demo_phase0() -> None:
                     sys.exit("backend exited during startup")
                 time.sleep(0.25)
         else:
-            sys.exit("backend did not become healthy in 15s")
+            sys.exit("backend did not become healthy in 60s")
         for path in ("/api/health", "/api/health/ready"):
             status, body = _get(base + path)
             print(f"\nGET {path} -> {status}\n{json.dumps(body, indent=2)}")
