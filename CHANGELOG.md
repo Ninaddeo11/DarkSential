@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.1] Live-lab evaluation fixes, 2026-10-08
+
+### Fixed (found by `make lab-eval` in the virtual lab)
+- **An expired quarantine was never re-applied while the attack continued.**
+  - *Cause:* a device that stayed critical at an unchanged score never reached the
+    response layer again, because `RISK_UPDATED` was only emitted on score/level
+    changes.
+  - *Evidence:* the archived run 2 in `docs/evaluation/phase7/lab_runs_pre_fix.csv`
+    shows "no automatic quarantine".
+  - *Fix:* new evidence (`IOC_CONTACT`, `ANOMALY_DETECTED`) on a quarantine-worthy
+    decision is now published even at an unchanged score.
+- **Operator decisions win.** Automatic quarantine of a device a human just released
+  pauses for `DSN_OPERATOR_RELEASE_GRACE_MINUTES` (default 30), and the skip is
+  audited. An automatic expiry does not pause it.
+- **A flood from a quarantined lab device no longer hangs.** It used to retry
+  1,000 × 3 s timeouts; it now stops after 10 consecutive failed connects.
+- **`lab_eval.py` saves results incrementally.** It writes the CSV after every run
+  and reports reconnect time in whole seconds, matching the broker log's resolution.
+
 ## [0.9.0] Phase 7: simulation and evaluation, 2026-10-08
 
 ### Added

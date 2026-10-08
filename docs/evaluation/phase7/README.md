@@ -67,7 +67,32 @@ for both threshold sets): accuracy 100.0%, precision 100.0%, recall 100.0% (TP 4
 | live event delivery, burst of 2000 (ms, loopback WebSocket) | 157.4 / 176.1 / 177.4 (n=2000) |
 
 Quarantine timings here use the dry-run driver; the real nftables path and device
-reconnection are measured in the virtual lab (`lab_runs.csv`, if present).
+reconnection are measured in the virtual lab below.
+
+## Virtual lab, end to end (wall clock)
+
+`scripts/lab_eval.py` against the running Docker lab: real packets through the gateway,
+real Mosquitto, real nftables, events received over Socket.IO through nginx. 3 runs.
+
+| measurement | run 0 | run 1 | run 2 |
+|---|---|---|---|
+| MQTT flood start -> ANOMALY_DETECTED on the live stream | 5.2 s | 12.0 s | 10.9 s |
+| C2 beacon -> IOC_CONTACT risk assessment | 5.6 s | 12.0 s | 11.3 s |
+| C2 beacon + flood -> automatic quarantine by the risk engine | 54.9 s | 57.3 s | 59.0 s |
+| operator API call -> IP in the nftables set (upper bound: polled via docker exec) | 324 ms | 285 ms | 210 ms |
+| release -> IP removed from the nftables set (upper bound, same polling) | 137 ms | 196 ms | 157 ms |
+| quarantine expiry -> DEVICE_RESTORED (auto-recovery) | 0.1 s | 0.1 s | 0.1 s |
+| release -> device's next MQTT CONNECT (whole seconds) | 4 s | 1 s | 0 s |
+
+C2 target auto-quarantined after a single beacon: 0 of 3 runs.
+An unknown device contacting a known C2 is critical with evidence of compromise, but
+automatic quarantine is paused for a device an operator released within
+`DSN_OPERATOR_RELEASE_GRACE_MINUTES` (30); such skips are recorded in the audit log.
+Detection waits for the 60 s traffic window to close, so flood and C2 times vary with
+where in the window the attack starts. Notes: none.
+
+`lab_runs_pre_fix.csv` keeps the earlier runs that exposed a defect (fixed in 0.9.1): run 2
+never re-quarantined a device that stayed critical at an unchanged score.
 
 ![Risk scores](score_distribution.png)
 

@@ -216,8 +216,16 @@ LAB_METRICS = (
     ("flood_detect_s", "MQTT flood start -> ANOMALY_DETECTED on the live stream", "s"),
     ("c2_rescore_s", "C2 beacon -> IOC_CONTACT risk assessment", "s"),
     ("auto_quarantine_s", "C2 beacon + flood -> automatic quarantine by the risk engine", "s"),
-    ("quarantine_apply_ms", "operator API call -> IP in the nftables quarantine set", "ms"),
-    ("release_apply_ms", "release -> IP removed from the nftables set", "ms"),
+    (
+        "quarantine_apply_ms",
+        "operator API call -> IP in the nftables set (upper bound: polled via docker exec)",
+        "ms",
+    ),
+    (
+        "release_apply_ms",
+        "release -> IP removed from the nftables set (upper bound, same polling)",
+        "ms",
+    ),
     ("recovery_s", "quarantine expiry -> DEVICE_RESTORED (auto-recovery)", "s"),
     ("reconnect_s", "release -> device's next MQTT CONNECT (whole seconds)", "s"),
 )
@@ -244,14 +252,23 @@ def lab_section(path: Path) -> list[str]:
     auto = [r.get("c2_auto_quarantined") for r in runs]
     lines += [
         "",
-        f"C2 target (unknown device) auto-quarantined after a single beacon: {auto.count('True')} of",
-        f"{len(runs)} runs; an unknown device contacting a known C2 is critical with evidence of",
-        "compromise. Detection waits for the 60 s traffic window to close, so flood and C2 times",
-        "vary with where in the window the attack starts. Notes: "
+        f"C2 target auto-quarantined after a single beacon: {auto.count('True')} of {len(runs)} runs.",
+        "An unknown device contacting a known C2 is critical with evidence of compromise, but",
+        "automatic quarantine is paused for a device an operator released within",
+        "`DSN_OPERATOR_RELEASE_GRACE_MINUTES` (30); such skips are recorded in the audit log.",
+        "Detection waits for the 60 s traffic window to close, so flood and C2 times vary with",
+        "where in the window the attack starts. Notes: "
         + ("; ".join(f"run {r['run']}: {r['notes']}" for r in runs if r.get("notes")) or "none")
         + ".",
         "",
     ]
+    pre_fix = path.with_name("lab_runs_pre_fix.csv")
+    if pre_fix.exists():
+        lines += [
+            f"`{pre_fix.name}` keeps the earlier runs that exposed a defect (fixed in 0.9.1): run 2",
+            "never re-quarantined a device that stayed critical at an unchanged score.",
+            "",
+        ]
     return lines
 
 
