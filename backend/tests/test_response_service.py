@@ -276,3 +276,51 @@ def test_recovery_job_scheduled_persistently(
         assert rt.rescore_all() >= 1
     finally:
         rt.stop()
+
+
+CRITICAL: dict[str, Any] = {
+    "action": "quarantine", "level": "critical", "score": 54.0, "explanation": "CRITICAL",
+}  # fmt: skip
+
+
+def test_operator_release_is_respected_but_expiry_is_not(rt: LabRuntime) -> None:
+    # Regression (virtual lab): after a release, new evidence at an unchanged score
+    # never reached the response layer, so an expired quarantine was never re-applied.
+    a = device(rt, "24:0a:c4:40:00:04", "192.168.50.24")
+    rt.bus.emit("RISK_UPDATED", a, ts=T0, **CRITICAL)
+    [q] = [q for q in rt.response.list(status="active") if q["node_id"] == a]
+    assert q["actor"] == "system:risk-engine"
+
+    # A human releases it: automatic quarantine pauses for the grace period.
+    rt.response.release(q["id"], actor="api:admin", reason="checked", now=T0 + timedelta(minutes=2))
+    rt.bus.emit("RISK_UPDATED", a, ts=T0 + timedelta(minutes=5), **CRITICAL)
+    assert rt.response.list(status="active") == []
+    skipped = [e for e in rt.audit.entries(20, node_id=a) if e["outcome"] == "skipped"]
+    assert skipped
+    assert skipped[0]["details"]["released_by"] == "api:admin"
+    # After the grace period, new evidence quarantines again.
+    rt.bus.emit("RISK_UPDATED", a, ts=T0 + timedelta(minutes=40), **CRITICAL)
+    assert [q["node_id"] for q in rt.response.list(status="active")] == [a]
+
+    # An automatic expiry does not pause anything: new evidence re-quarantines at once.
+    [q2] = rt.response.list(status="active")
+    expiry = q2["expires_at"]
+    assert rt.response.expire_due(expiry + timedelta(seconds=1)) == 1
+    assert rt.response.get(q2["id"])["released_by"] == "system:auto-recovery"
+    rt.bus.emit("RISK_UPDATED", a, ts=expiry + timedelta(minutes=1), **CRITICAL)
+    assert [q["node_id"] for q in rt.response.list(status="active")] == [a]
+
+
+def test_operator_grace_can_be_disabled(make_settings: SettingsFactory) -> None:
+    s = make_settings(operator_release_grace_minutes=0)
+    runtime = LabRuntime.build(s, load_feeds_config(s.feeds_config_path))
+    runtime.start()
+    try:
+        a = device(runtime, "24:0a:c4:40:00:05", "192.168.50.25")
+        runtime.bus.emit("RISK_UPDATED", a, ts=T0, **CRITICAL)
+        [q] = runtime.response.list(status="active")
+        runtime.response.release(q["id"], actor="api:admin", reason="x", now=T0)
+        runtime.bus.emit("RISK_UPDATED", a, ts=T0 + timedelta(minutes=1), **CRITICAL)
+        assert len(runtime.response.list(status="active")) == 1
+    finally:
+        runtime.stop()

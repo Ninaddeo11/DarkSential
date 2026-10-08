@@ -138,6 +138,9 @@ class Settings(BaseSettings):
     quarantine_minutes: int = Field(default=30, ge=1, le=7 * 24 * 60)
     # Threat model E1: refuse to quarantine more devices than this at once.
     max_active_quarantines: int = Field(default=10, ge=1, le=1000)
+    # After an operator releases a device, automatic quarantine of it is paused
+    # for this long (the human decision wins); an automatic expiry doesn't pause.
+    operator_release_grace_minutes: int = Field(default=30, ge=0, le=24 * 60)
     # Long-lived login secret: POST /api/auth/login exchanges it for a short-lived
     # operator session (quarantine / release / approve). Unset -> no operator login.
     admin_token: SecretStr | None = None

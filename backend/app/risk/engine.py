@@ -34,6 +34,8 @@ log = logging.getLogger(__name__)
 
 # Per-device memory of destinations already checked against threat intel.
 SEEN_DESTINATIONS_MAX = 4096
+# Assessments caused by new observations (not periodic re-scores or discovery).
+NEW_EVIDENCE_TRIGGERS = frozenset({"IOC_CONTACT", "ANOMALY_DETECTED"})
 
 ACTOR_LABELS = {"IntrusionSet", "Campaign"}
 THREAT_LABELS = {"Malware", "Tool", "IntrusionSet", "Campaign"}
@@ -538,7 +540,12 @@ class RiskEngine:
                 value=intel.value,
                 evidence=[e.model_dump(mode="json") for e in intel.evidence[:3]],
             )
-        if previous is None or previous[:2] != (d.score, d.level):
+        changed = previous is None or previous[:2] != (d.score, d.level)
+        # Fresh compromise evidence on a device that is still quarantine-worthy is
+        # published even when the score didn't move (e.g. a second C2 contact at the
+        # same score), so the response layer can re-quarantine after an expiry.
+        new_evidence = d.action == "quarantine" and d.trigger in NEW_EVIDENCE_TRIGGERS
+        if changed or new_evidence:
             self.bus.emit(
                 "RISK_UPDATED",
                 d.node_id,

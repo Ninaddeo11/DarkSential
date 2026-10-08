@@ -212,6 +212,49 @@ def _dist(d: dict[str, Any], digits: int = 1) -> str:
     return f"{_fmt(d['p50'], digits)} / {_fmt(d['p95'], digits)} / {_fmt(d['max'], digits)} (n={d['n']})"
 
 
+LAB_METRICS = (
+    ("flood_detect_s", "MQTT flood start -> ANOMALY_DETECTED on the live stream", "s"),
+    ("c2_rescore_s", "C2 beacon -> IOC_CONTACT risk assessment", "s"),
+    ("auto_quarantine_s", "C2 beacon + flood -> automatic quarantine by the risk engine", "s"),
+    ("quarantine_apply_ms", "operator API call -> IP in the nftables quarantine set", "ms"),
+    ("release_apply_ms", "release -> IP removed from the nftables set", "ms"),
+    ("recovery_s", "quarantine expiry -> DEVICE_RESTORED (auto-recovery)", "s"),
+    ("reconnect_s", "release -> device's next MQTT CONNECT (whole seconds)", "s"),
+)
+
+
+def lab_section(path: Path) -> list[str]:
+    """Live virtual-lab timings from ``scripts/lab_eval.py``, if that file exists."""
+    if not path.exists():
+        return ["*Virtual lab: no `lab_runs.csv` yet (run `make lab-eval`).*", ""]
+    with path.open(encoding="utf-8") as fh:
+        runs = list(csv.DictReader(fh))
+    lines = [
+        "## Virtual lab, end to end (wall clock)",
+        "",
+        "`scripts/lab_eval.py` against the running Docker lab: real packets through the gateway,",
+        f"real Mosquitto, real nftables, events received over Socket.IO through nginx. {len(runs)} runs.",
+        "",
+        "| measurement | " + " | ".join(f"run {r['run']}" for r in runs) + " |",
+        "|---|" + "---|" * len(runs),
+    ]
+    for key, label, unit in LAB_METRICS:
+        cells = [(r.get(key) or "missed") + ("" if not r.get(key) else f" {unit}") for r in runs]
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+    auto = [r.get("c2_auto_quarantined") for r in runs]
+    lines += [
+        "",
+        f"C2 target (unknown device) auto-quarantined after a single beacon: {auto.count('True')} of",
+        f"{len(runs)} runs; an unknown device contacting a known C2 is critical with evidence of",
+        "compromise. Detection waits for the 60 s traffic window to close, so flood and C2 times",
+        "vary with where in the window the attack starts. Notes: "
+        + ("; ".join(f"run {r['run']}: {r['notes']}" for r in runs if r.get("notes")) or "none")
+        + ".",
+        "",
+    ]
+    return lines
+
+
 def write_summary(
     path: Path,
     meta: dict[str, Any],
@@ -304,8 +347,9 @@ def write_summary(
         f"| live event delivery, burst of {ws['burst_size']} (ms, loopback WebSocket) | {_dist(ws['burst'], 1)} |",
         "",
         "Quarantine timings here use the dry-run driver; the real nftables path and device",
-        "reconnection are measured in the virtual lab (`lab_runs.csv`, if present).",
+        "reconnection are measured in the virtual lab below.",
         "",
+        *lab_section(path.parent / "lab_runs.csv"),
         "![Risk scores](score_distribution.png)",
         "",
         "![Detection latency](detection_latency.png)",

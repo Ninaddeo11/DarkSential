@@ -213,6 +213,41 @@ def test_quiet_ioc_contact_is_assessed_immediately(rt: LabRuntime) -> None:
     assert len(rt.risk.history(esp)) == before + 1
 
 
+def test_new_evidence_is_published_even_at_an_unchanged_score(rt: LabRuntime) -> None:
+    seen: list[Event] = []
+    rt.bus.subscribe(seen.append)
+    esp = node(rt, ESP)
+    # Unknown device + C2 contact: critical, with evidence of compromise -> quarantine.
+    rt.pipeline.ingest(
+        [
+            TrafficEvent(
+                ts=START + timedelta(seconds=5),
+                src_mac="24:0a:c4:40:00:04",
+                src_ip=ESP,
+                dst_ip=FEODO_C2,
+                dst_port=8080,
+                proto="tcp",
+            )
+        ]
+    )
+    rt.pipeline.flush()
+    now = START + timedelta(minutes=1)
+    first = rt.risk.assess(esp, trigger="manual", now=now)
+    assert first is not None
+    assert first.action == "quarantine"
+
+    def updates() -> int:
+        return sum(e.type == "RISK_UPDATED" and e.node_id == esp for e in seen)
+
+    before = updates()
+    rt.risk.assess(esp, trigger="periodic", now=now)  # same score, no new evidence: quiet
+    assert updates() == before
+    again = rt.risk.assess(esp, trigger="IOC_CONTACT", now=now)  # new evidence, same score
+    assert again is not None
+    assert again.score == first.score
+    assert updates() == before + 1
+
+
 def test_unknown_vs_approved_device(rt: LabRuntime) -> None:
     plug = node(rt, "192.168.50.23")
     before = rt.risk.assess(plug, now=START)

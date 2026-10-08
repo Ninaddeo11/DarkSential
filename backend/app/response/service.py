@@ -370,6 +370,22 @@ class ResponseService:
             self.commander.send("ALERT", event.node_id, level)
         if action != "quarantine" or not self.settings.auto_quarantine:
             return
+        released = self._recent_operator_release(event.node_id, event.ts)
+        if released is not None:
+            self.audit.record(
+                "system:risk-engine",
+                "quarantine",
+                outcome="skipped",
+                node_id=event.node_id,
+                ts=event.ts,
+                details={
+                    "reason": "operator released this device recently",
+                    "released_by": released["released_by"],
+                    "released_at": released["released_at"],
+                    "score": event.payload.get("score"),
+                },
+            )
+            return
         try:
             self.quarantine(
                 event.node_id,
@@ -387,6 +403,28 @@ class ResponseService:
             pass  # audited + emitted already
         except (DriverError, KeyError):
             log.exception("automatic quarantine failed", extra={"node_id": event.node_id})
+
+    def _recent_operator_release(self, node_id: str, now: datetime) -> dict[str, Any] | None:
+        """The latest release of this device, if a human made it within the grace period."""
+        grace = timedelta(minutes=self.settings.operator_release_grace_minutes)
+        if not grace:
+            return None
+        with self.sessions() as session:
+            row = session.scalars(
+                select(Quarantine)
+                .where(Quarantine.node_id == node_id, Quarantine.released_at.is_not(None))
+                .order_by(Quarantine.released_at.desc())
+                .limit(1)
+            ).first()
+            if row is None or row.released_at is None:
+                return None
+            released_at = row.released_at
+            if released_at.tzinfo is None:
+                released_at = released_at.replace(tzinfo=UTC)
+            by = row.released_by or ""
+            if by.startswith("system:") or now - released_at > grace:
+                return None
+            return {"released_by": by, "released_at": released_at.isoformat()}
 
     def on_ack(self, raw: bytes) -> None:
         acked = self.commander.handle_ack(raw)
