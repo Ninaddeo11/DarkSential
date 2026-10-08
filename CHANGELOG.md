@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.10.0] Multi-page command center, 2026-10-08
+
+### Added
+- **Routed pages** (react-router 8.4.0): Overview, Devices, Device detail, Events,
+  Threat intel, Response, Evaluation, and a 404 page. They share one live store and
+  one Socket.IO connection (`src/live/LiveContext.tsx`) inside an app shell with a
+  sidebar (`src/layout/Shell.tsx`). Its badges count critical and quarantined devices.
+- **Device detail page:** the risk-score history plotted against the calibrated
+  thresholds (`RiskHistory`), plus detections and recent events.
+- **Response page:** quarantine history and the audit log with chain verification.
+- **Threat intel page:** IOC and CVE lookups, graph counts, the rules → ATT&CK table.
+- **Evaluation page:** `make evaluate` / `regenerate` now copy `summary.json`,
+  `lab_runs.csv` and the charts into `frontend/public/evaluation`, and the page
+  reads them from there.
+- API client: detections, rules, related threats, CVEs, graph counts, risk model,
+  audit and audit verification.
+
+### Fixed
+- Leaving the Overview threw `removeChild` from the 3D labels. They now render into
+  a layer that `Graph3D` owns.
+- Component styles (`.input`, `.btn`, ...) moved into `@layer components`, so
+  utility classes such as widths override them.
+
+### Known limitations
+- The Events page shows only events received since the page was opened, plus the
+  replay buffer. There is no server-side event search yet.
+- Device pages for devices the browser has not seen yet show "not known (yet)"
+  until the snapshot loads.
+
 ## [0.9.1] Live-lab evaluation fixes, 2026-10-08
 
 ### Fixed (found by `make lab-eval` in the virtual lab)

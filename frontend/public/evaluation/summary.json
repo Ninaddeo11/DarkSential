@@ -1,0 +1,381 @@
+{
+  "meta": {
+    "generated": "2026-10-08 08:39 UTC",
+    "platform": "Windows 11 (AMD64)",
+    "python": "3.13.15",
+    "cpus": 32,
+    "calibration_seeds": "1-10",
+    "eval_seeds": "11-30",
+    "heldout_max_quiet": 17.02
+  },
+  "calibration": {
+    "max_must_not_alert": 10.0,
+    "min_must_alert": 16.17,
+    "max_single_signal": 16.38,
+    "min_corroborated": 36.38,
+    "current": {
+      "critical": 75.0,
+      "high": 50.0,
+      "low": 0.0,
+      "medium": 25.0
+    },
+    "separable": true,
+    "margins": {
+      "alert": 6.17,
+      "quarantine": 20.0
+    },
+    "suggested": {
+      "low": 0.0,
+      "medium": 13.1,
+      "high": 19.8,
+      "critical": 26.4
+    }
+  },
+  "calibrated": {
+    "devices": {
+      "benign": 400,
+      "unknown": 20,
+      "vulnerable": 20,
+      "malicious": 60
+    },
+    "alert_tpr": 1.0,
+    "unknown_flagged": 1.0,
+    "unknown_alerted": 0.0,
+    "alert_fpr": 0.0025,
+    "vulnerable_alerted": 1.0,
+    "vulnerable_quarantined": 0.0,
+    "quarantine_tpr": 1.0,
+    "single_signal_quarantined": 0.0,
+    "quarantine_fpr": 0.0,
+    "window_tpr": 0.5865384615384616,
+    "window_fpr": 0.001894407379952228,
+    "windows": {
+      "attack": 208,
+      "normal": 12141
+    },
+    "correlation": {
+      "tp": 40,
+      "fn": 0,
+      "fp": 0,
+      "tn": 60,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "latency_s": {
+      "unknown_device": {
+        "first_detection": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "first_alert": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "correlation": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        }
+      },
+      "mqtt_flood": {
+        "first_detection": {
+          "n": 20,
+          "p50": 34.0,
+          "p95": 55.0,
+          "max": 56.0
+        },
+        "first_alert": {
+          "n": 20,
+          "p50": 34.0,
+          "p95": 55.0,
+          "max": 56.0
+        },
+        "correlation": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        }
+      },
+      "kev_ioc": {
+        "first_detection": {
+          "n": 20,
+          "p50": 38.0,
+          "p95": 60.0,
+          "max": 60.0
+        },
+        "first_alert": {
+          "n": 20,
+          "p50": 38.0,
+          "p95": 60.0,
+          "max": 60.0
+        },
+        "correlation": {
+          "n": 20,
+          "p50": 38.0,
+          "p95": 60.0,
+          "max": 60.0
+        }
+      },
+      "quarantine_recovery": {
+        "first_detection": {
+          "n": 20,
+          "p50": 34.5,
+          "p95": 55.0,
+          "max": 57.0
+        },
+        "first_alert": {
+          "n": 20,
+          "p50": 34.5,
+          "p95": 55.0,
+          "max": 57.0
+        },
+        "correlation": {
+          "n": 20,
+          "p50": 34.5,
+          "p95": 55.0,
+          "max": 57.0
+        }
+      },
+      "kev_only": {
+        "first_detection": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "first_alert": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "correlation": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        }
+      }
+    },
+    "timing": {
+      "risk_assess_ms": {
+        "n": 500,
+        "p50": 2.3088999951141886,
+        "p95": 3.7835000111954287,
+        "max": 5.410700003267266
+      },
+      "quarantine_ms": {
+        "n": 20,
+        "p50": 7.304099999601021,
+        "p95": 9.95870000042487,
+        "max": 11.736800006474368
+      },
+      "recovery_s": {
+        "n": 20,
+        "p50": 22.967136,
+        "p95": 51.763507,
+        "max": 56.461125
+      },
+      "discovery_s": {
+        "n": 20,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      }
+    },
+    "thresholds": {
+      "critical": 26.4,
+      "high": 19.8,
+      "low": 0.0,
+      "medium": 13.1
+    }
+  },
+  "ws_latency_ms": {
+    "steady": {
+      "n": 300,
+      "p50": 56.21940000128234,
+      "p95": 103.98129999521188,
+      "max": 114.59300000569783
+    },
+    "burst": {
+      "n": 2000,
+      "p50": 157.44130000530276,
+      "p95": 176.05599999660626,
+      "max": 177.44739999761805
+    },
+    "burst_size": 2000
+  },
+  "phase3": {
+    "devices": {
+      "benign": 400,
+      "unknown": 20,
+      "vulnerable": 20,
+      "malicious": 60
+    },
+    "alert_tpr": 0.6666666666666666,
+    "unknown_flagged": 1.0,
+    "unknown_alerted": 0.0,
+    "alert_fpr": 0.0,
+    "vulnerable_alerted": 1.0,
+    "vulnerable_quarantined": 0.0,
+    "quarantine_tpr": 0.0,
+    "single_signal_quarantined": 0.0,
+    "quarantine_fpr": 0.0,
+    "window_tpr": 0.5865384615384616,
+    "window_fpr": 0.001894407379952228,
+    "windows": {
+      "attack": 208,
+      "normal": 12141
+    },
+    "correlation": {
+      "tp": 40,
+      "fn": 0,
+      "fp": 0,
+      "tn": 60,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "latency_s": {
+      "unknown_device": {
+        "first_detection": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "first_alert": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "correlation": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        }
+      },
+      "mqtt_flood": {
+        "first_detection": {
+          "n": 20,
+          "p50": 34.0,
+          "p95": 55.0,
+          "max": 56.0
+        },
+        "first_alert": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "correlation": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        }
+      },
+      "kev_ioc": {
+        "first_detection": {
+          "n": 20,
+          "p50": 38.0,
+          "p95": 60.0,
+          "max": 60.0
+        },
+        "first_alert": {
+          "n": 20,
+          "p50": 38.0,
+          "p95": 60.0,
+          "max": 60.0
+        },
+        "correlation": {
+          "n": 20,
+          "p50": 38.0,
+          "p95": 60.0,
+          "max": 60.0
+        }
+      },
+      "quarantine_recovery": {
+        "first_detection": {
+          "n": 20,
+          "p50": 34.5,
+          "p95": 55.0,
+          "max": 57.0
+        },
+        "first_alert": {
+          "n": 20,
+          "p50": 34.5,
+          "p95": 55.0,
+          "max": 57.0
+        },
+        "correlation": {
+          "n": 20,
+          "p50": 34.5,
+          "p95": 55.0,
+          "max": 57.0
+        }
+      },
+      "kev_only": {
+        "first_detection": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "first_alert": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "correlation": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        }
+      }
+    },
+    "timing": {
+      "risk_assess_ms": {
+        "n": 500,
+        "p50": 2.2771000003558584,
+        "p95": 3.8046999979997054,
+        "max": 8.57489999907557
+      },
+      "quarantine_ms": {
+        "n": 20,
+        "p50": 7.617049996042624,
+        "p95": 10.908900003414601,
+        "max": 11.585700005525723
+      },
+      "recovery_s": {
+        "n": 20,
+        "p50": 22.967136,
+        "p95": 51.763507,
+        "max": 56.461125
+      },
+      "discovery_s": {
+        "n": 20,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      }
+    },
+    "thresholds": {
+      "critical": 75.0,
+      "high": 50.0,
+      "low": 0.0,
+      "medium": 25.0
+    }
+  }
+}

@@ -1,6 +1,15 @@
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import * as THREE from "three";
 import type { NodeState } from "../live/store";
 import { makeNode, step, type LayoutNode } from "../viz/layout";
@@ -21,7 +30,12 @@ interface Props {
  * pulsing. Positions update imperatively each frame, so motion never re-renders
  * React. */
 export function Graph3D({ nodes, selected, onSelect }: Props) {
+  // Labels (drei <Html>) render into this layer, which Graph3D owns. By default
+  // they attach to a wrapper react-three-fiber removes first on unmount, which
+  // threw "removeChild: not a child of this node" when leaving the page.
+  const labels = useRef<HTMLDivElement>(null!);
   return (
+    <div className="relative h-full w-full">
     <Canvas
       camera={{ position: [0, 8, 15], fov: 50 }}
       dpr={[1, 2]}
@@ -33,14 +47,18 @@ export function Graph3D({ nodes, selected, onSelect }: Props) {
       <ambientLight intensity={0.45} />
       <pointLight position={[0, 6, 0]} intensity={60} color={SIGNAL_COLOR} />
       <pointLight position={[10, 12, 10]} intensity={80} />
-      <Scene nodes={nodes} selected={selected} onSelect={onSelect} />
+      <Scene nodes={nodes} selected={selected} onSelect={onSelect} labels={labels} />
       <gridHelper args={[40, 40, "#1d2939", "#0e1520"]} position={[0, -4, 0]} />
       <OrbitControls enableDamping dampingFactor={0.08} minDistance={6} maxDistance={40} />
     </Canvas>
+    <div ref={labels} className="pointer-events-none absolute inset-0 overflow-hidden" />
+    </div>
   );
 }
 
-function Scene({ nodes, selected, onSelect }: Props) {
+type Labels = RefObject<HTMLDivElement>;
+
+function Scene({ nodes, selected, onSelect, labels }: Props & { labels: Labels }) {
   const layout = useRef(new Map<string, LayoutNode>([[HUB, makeNode(HUB, [0, 0, 0])]]));
   const settled = useRef(false);
   const ids = useMemo(() => Object.keys(nodes).sort(), [nodes]);
@@ -98,7 +116,7 @@ function Scene({ nodes, selected, onSelect }: Props) {
 
   return (
     <>
-      <Hub />
+      <Hub labels={labels} />
       <lineSegments ref={links} frustumCulled={false}>
         <bufferGeometry />
         <lineBasicMaterial vertexColors transparent opacity={0.9} />
@@ -112,6 +130,7 @@ function Scene({ nodes, selected, onSelect }: Props) {
           selected={id === selected}
           onSelect={onSelect}
           groups={groups.current}
+          labels={labels}
         />
         ) : null;
       })}
@@ -119,7 +138,7 @@ function Scene({ nodes, selected, onSelect }: Props) {
   );
 }
 
-function Hub() {
+function Hub({ labels }: { labels: Labels }) {
   const mesh = useRef<THREE.Mesh>(null);
   useFrame((_, dt) => {
     if (mesh.current) mesh.current.rotation.y += dt * 0.4;
@@ -135,7 +154,7 @@ function Hub() {
           wireframe
         />
       </mesh>
-      <Html center position={[0, -1.3, 0]} style={{ pointerEvents: "none" }}>
+      <Html center position={[0, -1.3, 0]} style={{ pointerEvents: "none" }} portal={labels}>
         <div className="text-[10px] font-semibold tracking-widest whitespace-nowrap text-signal uppercase">
           DSN gateway
         </div>
@@ -149,9 +168,16 @@ interface NodeProps {
   selected: boolean;
   onSelect: (id: string) => void;
   groups: Map<string, THREE.Group>; // stable registry the scene positions each frame
+  labels: Labels;
 }
 
-const DeviceNode = memo(function DeviceNode({ state, selected, onSelect, groups }: NodeProps) {
+const DeviceNode = memo(function DeviceNode({
+  state,
+  selected,
+  onSelect,
+  groups,
+  labels,
+}: NodeProps) {
   const id = state.device.node_id;
   const register = useCallback(
     (g: THREE.Group | null) => {
@@ -223,6 +249,7 @@ const DeviceNode = memo(function DeviceNode({ state, selected, onSelect, groups 
       )}
       <Html
         center
+        portal={labels}
        
         position={[0, radius + 0.55, 0]}
         style={{ pointerEvents: "none" }}

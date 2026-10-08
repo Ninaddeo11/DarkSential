@@ -1,0 +1,4 @@
+run,started,flood_detect_s,c2_rescore_s,c2_device,c2_auto_quarantined,quarantine_apply_ms,recovery_s,release_apply_ms,reconnect_s,auto_quarantine_s,notes
+0,2026-10-08T13:12:55+00:00,5.2,5.6,sensor-gate,False,324,0.1,137,4,54.9,
+1,2026-10-08T13:17:48+00:00,12.0,12.0,thermo-hall,False,285,0.1,196,1,57.3,
+2,2026-10-08T13:22:49+00:00,10.9,11.3,cam-front,False,210,0.1,157,0,59.0,

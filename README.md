@@ -235,16 +235,25 @@ make docker-test-mqtt   # integration tests against a real TLS Mosquitto (Docker
 
 ### Command center (Phase 6)
 
-With the stack or the virtual lab running, open <http://127.0.0.1:5173>:
+With the stack or the virtual lab running, open <http://127.0.0.1:5173>. The
+command center has several pages. They share one live connection, and every
+page has its own URL, so pages can be bookmarked and reloaded:
+
+| Page | URL | What it shows |
+|---|---|---|
+| Overview | `/` | KPI tiles, the **3D network**, a side inspector, the latest alerts |
+| Devices | `/devices` | A searchable, sortable table, filterable by level, quarantine and trust |
+| Device detail | `/devices/:id` | Identity, services and CPEs; operator actions; the risk **waterfall**; **risk history** against the thresholds; the **threat-graph** path; **SHAP**; detections; recent events |
+| Events | `/events` | The live event timeline (`?device=<id>` filters to one device) |
+| Threat intel | `/intel` | Threat-graph counts, IOC and CVE lookups, feed health, detection rules → ATT&CK |
+| Response | `/response` | Quarantines (active / all) and the hash-chained audit log, with a verify button |
+| Evaluation | `/evaluation` | The Phase 7 measured results (`make evaluate` publishes them to `frontend/public/evaluation`) |
 
 - **3D network.** Devices around the DSN gateway. Colour = risk level (magenta =
   quarantined), size = score, a pulse marks new activity. Drag to orbit; click a
-  device (or pick it in the ranked list) to inspect it.
-- **Inspector.** Identity and services; the risk score as a **waterfall** of factor
-  contributions; the XGBoost **SHAP** comparison; the **threat-graph** path (e.g.
-  device → GoAhead 3.6.4 → CVE-2017-17562); and, for operators, **quarantine /
-  release / approve** with a required, audited reason.
-- **Event timeline** (live, filterable) and **feed health**.
+  device to inspect it, or open its full page.
+- **Operator actions** (quarantine / release / approve, each with a required,
+  audited reason) appear in the inspector and on the device page.
 
 Events stream over Socket.IO (`/api/socket.io`). They are batched every 100 ms,
 resumed from the last seen event after a reconnect, and typed by a schema

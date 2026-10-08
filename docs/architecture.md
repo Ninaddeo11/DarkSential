@@ -627,6 +627,8 @@ Tailwind 4):
 
 | Piece | What it does |
 |---|---|
+| `live/LiveContext.tsx` | Owns the single `LiveStore`, the Socket.IO connection and the session for every page (`useLive()`), so changing pages never reconnects. |
+| `layout/Shell.tsx`, `pages/*` | react-router app shell and pages: Overview (`/`), Devices, Device detail (`/devices/:id`), Events, Threat intel, Response, Evaluation. nginx (`try_files`) and Vercel (rewrite) serve `index.html` for deep links. |
 | `live/store.ts` | Pure `reduce(state, batch)` that sorts by seq, ignores duplicates (resume overlap) and caps history at 5,000 events. `LiveStore` coalesces ingests to one update per animation frame. |
 | `components/Graph3D.tsx` | Force-directed 3D graph around the gateway hub. Colour = risk level (magenta = quarantined), size = score, a pulse ring on recent activity (continuous while quarantined), click to inspect. Positions update imperatively in `useFrame` from preallocated buffers, so motion never re-renders React; three.js is a lazily loaded chunk. |
 | `viz/layout.ts` | Dependency-free force layout: id-seeded positions (stable across reloads), bounded radius, settles to rest. |

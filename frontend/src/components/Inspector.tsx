@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { api, ApiError } from "../api/client";
 import type { Quarantine, RiskDetail, Role } from "../api/types";
 import type { NodeState } from "../live/store";
@@ -52,9 +53,14 @@ export function Inspector({ node, role, dryRun, onClose }: Props) {
           </div>
           <p className="mt-0.5 truncate font-mono text-[10px] text-ink-400">{id}</p>
         </div>
-        <button className="btn px-2 py-1" onClick={onClose} aria-label="Close inspector">
-          ✕
-        </button>
+        <div className="flex shrink-0 gap-1.5">
+          <Link to={`/devices/${id}`} className="btn px-2 py-1">
+            Open full page
+          </Link>
+          <button className="btn px-2 py-1" onClick={onClose} aria-label="Close inspector">
+            ✕
+          </button>
+        </div>
       </div>
 
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto py-3">
@@ -164,7 +170,7 @@ export function Inspector({ node, role, dryRun, onClose }: Props) {
   );
 }
 
-interface ControlsProps {
+export interface ControlsProps {
   nodeId: string;
   approved: boolean;
   active: Quarantine | null;
@@ -173,7 +179,7 @@ interface ControlsProps {
   onChanged: (q: Quarantine | null) => void;
 }
 
-function Controls({ nodeId, approved, active, role, dryRun, onChanged }: ControlsProps) {
+export function Controls({ nodeId, approved, active, role, dryRun, onChanged }: ControlsProps) {
   const [reason, setReason] = useState("");
   const [minutes, setMinutes] = useState(30);
   const [busy, setBusy] = useState(false);

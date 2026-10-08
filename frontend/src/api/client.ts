@@ -1,11 +1,18 @@
 import type {
+  AuditEntry,
+  AuditVerify,
+  CveMatch,
+  Detection,
   Device,
   FeedsStatus,
   Liveness,
   Me,
   Quarantine,
   RiskDecision,
+  RiskLevel,
+  RelatedThreat,
   RiskDetail,
+  Rule,
   Session,
 } from "./types";
 import type { DsnEvent } from "../generated/events";
@@ -83,4 +90,19 @@ export const api = {
     }),
   approve: (nodeId: string) =>
     request<Device>(`/api/devices/${encodeURIComponent(nodeId)}/approve`, { method: "POST" }),
+  quarantinesByStatus: (status?: "active" | "released" | "failed") =>
+    request<Quarantine[]>(`/api/quarantines?limit=200${status ? `&status=${status}` : ""}`),
+  detections: (nodeId?: string, limit = 100) =>
+    request<Detection[]>(
+      `/api/detections?limit=${limit}${nodeId ? `&node_id=${encodeURIComponent(nodeId)}` : ""}`,
+    ),
+  rules: () => request<Rule[]>("/api/rules"),
+  relatedThreats: (ioc: string) =>
+    request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`),
+  cves: (cpe: string) => request<CveMatch[]>(`/api/intel/cves?cpe=${encodeURIComponent(cpe)}`),
+  graphCounts: () => request<Record<string, number>>("/api/intel/graph/counts"),
+  riskModel: () =>
+    request<{ linear: { thresholds: Partial<Record<RiskLevel, number>> } }>("/api/risk/model"),
+  audit: (limit = 100) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
+  auditVerify: () => request<AuditVerify>("/api/audit/verify"),
 };

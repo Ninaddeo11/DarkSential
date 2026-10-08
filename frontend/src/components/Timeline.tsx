@@ -48,13 +48,15 @@ interface Props {
   nodes: Record<string, NodeState>;
   selected: string | null;
   onSelect: (id: string) => void;
+  /** Start filtered to the selected device (e.g. /events?device=…). */
+  initialOnlySelected?: boolean;
 }
 
 /** Newest-first event log. Virtualized: only visible rows are in the DOM, so the
  * 5,000-event buffer costs the same as 20 rows. */
-export function Timeline({ events, nodes, selected, onSelect }: Props) {
+export function Timeline({ events, nodes, selected, onSelect, initialOnlySelected = false }: Props) {
   const [hidden, setHidden] = useState<Set<EventType>>(new Set());
-  const [onlySelected, setOnlySelected] = useState(false);
+  const [onlySelected, setOnlySelected] = useState(initialOnlySelected);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(240);
   const box = useRef<HTMLDivElement>(null);

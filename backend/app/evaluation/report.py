@@ -454,6 +454,8 @@ def evaluate(
     if samples:
         plot_ws(out / "ws_latency.png", samples)
     write_summary(out / "README.md", meta, calib, summary_cur, summary_cal, ws_summary)
+    if out == OUT:
+        publish_to_frontend(out)
     return report
 
 
@@ -518,3 +520,28 @@ def regenerate(out: Path = OUT) -> None:
         out / "README.md", meta, report["calibration"], report.get("phase3") or report["shipped"], report["calibrated"],
         report["ws_latency_ms"],
     )  # fmt: skip
+    if out == OUT:
+        publish_to_frontend(out)
+
+
+PUBLIC = REPO_ROOT / "frontend" / "public" / "evaluation"
+PUBLISHED = (
+    "summary.json",
+    "lab_runs.csv",
+    "score_distribution.png",
+    "detection_latency.png",
+    "ws_latency.png",
+)
+
+
+def publish_to_frontend(out: Path = OUT, public: Path = PUBLIC) -> list[str]:
+    """Copy the summary, lab runs and charts the dashboard's Evaluation page shows."""
+    import shutil
+
+    public.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for name in PUBLISHED:
+        if (out / name).exists():
+            shutil.copyfile(out / name, public / name)
+            copied.append(name)
+    return copied

@@ -144,3 +144,68 @@ export interface Session {
   role: Role;
   expires_at: string;
 }
+
+export interface RelatedThreat {
+  threat_id: string;
+  label: string;
+  name: string | null;
+  external_id: string | null;
+  hops: number;
+  confidence: number | null;
+  sources: string[];
+  indicator_id: string | null;
+  indicator_stale: boolean;
+  path: PathStep[];
+}
+
+export interface CveMatch {
+  cve: string;
+  vulnerability_id: string;
+  cvss_score: number | null;
+  cvss_severity: string | null;
+  kev: boolean;
+  kev_ransomware: boolean;
+  kev_due_date: string | null;
+  criteria: string;
+  match: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  ts: string;
+  actor: string;
+  action: string;
+  node_id: string | null;
+  outcome: string;
+  details: Record<string, unknown>;
+  prev_hash: string;
+  hash: string;
+}
+
+export interface AuditVerify {
+  ok: boolean;
+  entries: number;
+  head: string;
+  first_bad_id: number | null;
+}
+
+export interface Detection {
+  id: number;
+  node_id: string;
+  ts: string;
+  kind: "anomaly" | "rule";
+  rule_id: string | null;
+  severity: string;
+  score: number;
+  techniques: string[];
+  summary: string;
+}
+
+export interface Rule {
+  id: string;
+  title: string;
+  severity: string;
+  techniques: string[];
+  rationale: string;
+  source: string;
+}
