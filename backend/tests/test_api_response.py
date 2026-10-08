@@ -16,15 +16,28 @@ from app.simulation.traffic import TrafficSimulator
 from tests.conftest import SettingsFactory
 
 TOKEN = "admin-token-for-tests-0123456789abcdef"
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
+JWT_SECRET = "jwt-secret-for-tests-0123456789abcdef"
 T0 = datetime(2026, 10, 1, 9, tzinfo=UTC)
 
 
 @pytest.fixture
 def client(make_settings: SettingsFactory) -> Iterator[TestClient]:
-    s = make_settings(admin_token=TOKEN, protected_hosts=["192.168.50.1"])
+    s = make_settings(
+        admin_token=TOKEN, auth_jwt_secret=JWT_SECRET, protected_hosts=["192.168.50.1"]
+    )
     with TestClient(create_app(s)) as c:
         yield c
+
+
+def login(c: TestClient, secret: str = TOKEN) -> dict[str, str]:
+    r = c.post("/api/auth/login", json={"secret": secret})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.fixture
+def auth(client: TestClient) -> dict[str, str]:
+    return login(client)
 
 
 def node(c: TestClient, mac: str, ip: str) -> str:
@@ -34,7 +47,7 @@ def node(c: TestClient, mac: str, ip: str) -> str:
     return str(view.node_id)
 
 
-def test_mutations_require_valid_bearer_token(client: TestClient) -> None:
+def test_mutations_require_valid_bearer_token(client: TestClient, auth: dict[str, str]) -> None:
     n = node(client, "24:0a:c4:40:00:04", "192.168.50.24")
     body = {"node_id": n, "reason": "suspicious"}
     assert client.post("/api/quarantines", json=body).status_code == 401
@@ -43,26 +56,29 @@ def test_mutations_require_valid_bearer_token(client: TestClient) -> None:
     assert bad.headers["www-authenticate"] == "Bearer"
     basic = client.post("/api/quarantines", json=body, headers={"Authorization": f"Basic {TOKEN}"})
     assert basic.status_code == 401
-    ok = client.post("/api/quarantines", json=body, headers=AUTH)
+    # The long-lived admin secret itself is not a bearer token: log in first.
+    raw = client.post("/api/quarantines", json=body, headers={"Authorization": f"Bearer {TOKEN}"})
+    assert raw.status_code == 401
+    ok = client.post("/api/quarantines", json=body, headers=auth)
     assert ok.status_code == 201
     assert ok.json()["actor"] == "api:admin"
     assert ok.json()["reason"] == "manual: suspicious"
 
 
-def test_mutations_disabled_without_admin_token(make_settings: SettingsFactory) -> None:
+def test_mutations_disabled_without_auth(make_settings: SettingsFactory) -> None:
     with TestClient(create_app(make_settings())) as c:
         n = node(c, "24:0a:c4:40:00:04", "192.168.50.24")
-        r = c.post("/api/quarantines", json={"node_id": n, "reason": "x y z"}, headers=AUTH)
+        r = c.post("/api/quarantines", json={"node_id": n, "reason": "x y z"})
         assert r.status_code == 403
-        assert "DSN_ADMIN_TOKEN" in r.json()["detail"]
+        assert "DSN_AUTH_JWT_SECRET" in r.json()["detail"]
         assert c.get("/api/quarantines").status_code == 200  # reads stay available
 
 
-def test_quarantine_release_approve_audit(client: TestClient) -> None:
+def test_quarantine_release_approve_audit(client: TestClient, auth: dict[str, str]) -> None:
     n = node(client, "24:0a:c4:40:00:04", "192.168.50.24")
     gw = node(client, "50:c7:bf:00:00:01", "192.168.50.1")
     refused = client.post(
-        "/api/quarantines", json={"node_id": gw, "reason": "test it"}, headers=AUTH
+        "/api/quarantines", json={"node_id": gw, "reason": "test it"}, headers=auth
     )
     assert refused.status_code == 409
     assert "protected host" in refused.json()["detail"]
@@ -70,36 +86,36 @@ def test_quarantine_release_approve_audit(client: TestClient) -> None:
         client.post(
             "/api/quarantines",
             json={"node_id": "dev-0000000000000000", "reason": "abc"},
-            headers=AUTH,
+            headers=auth,
         ).status_code
         == 404
     )
     assert (
         client.post(
-            "/api/quarantines", json={"node_id": "bad", "reason": "abc"}, headers=AUTH
+            "/api/quarantines", json={"node_id": "bad", "reason": "abc"}, headers=auth
         ).status_code
         == 422
     )
     q = client.post(
         "/api/quarantines",
         json={"node_id": n, "reason": "manual check", "minutes": 15},
-        headers=AUTH,
+        headers=auth,
     ).json()
     active = client.get("/api/quarantines", params={"status": "active"}).json()
     assert [a["id"] for a in active] == [q["id"]]
     released = client.post(
-        f"/api/quarantines/{q['id']}/release", json={"reason": "verified clean"}, headers=AUTH
+        f"/api/quarantines/{q['id']}/release", json={"reason": "verified clean"}, headers=auth
     )
     assert released.json()["status"] == "released"
     assert (
         client.post(
-            "/api/quarantines/999/release", json={"reason": "abc"}, headers=AUTH
+            "/api/quarantines/999/release", json={"reason": "abc"}, headers=auth
         ).status_code
         == 404
     )
-    approved = client.post(f"/api/devices/{n}/approve", headers=AUTH)
+    approved = client.post(f"/api/devices/{n}/approve", headers=auth)
     assert approved.json()["trust"] == "approved"
-    assert client.post("/api/devices/dev-0000000000000000/approve", headers=AUTH).status_code == 404
+    assert client.post("/api/devices/dev-0000000000000000/approve", headers=auth).status_code == 404
     audit = client.get("/api/audit", params={"limit": 50}).json()
     actions = [(a["action"], a["outcome"], a["actor"]) for a in audit]
     assert ("approve", "ok", "api:admin") in actions
@@ -115,13 +131,15 @@ def test_quarantine_release_approve_audit(client: TestClient) -> None:
 
 
 def test_hosted_mode_has_no_response_api(make_settings: SettingsFactory) -> None:
-    with TestClient(create_app(make_settings(deployment="hosted", admin_token=TOKEN))) as c:
+    s = make_settings(deployment="hosted", admin_token=TOKEN, auth_jwt_secret=JWT_SECRET)
+    with TestClient(create_app(s)) as c:
+        auth = login(c)
         assert c.get("/api/quarantines").status_code == 503
         assert (
             c.post(
                 "/api/quarantines",
                 json={"node_id": "dev-0000000000000000", "reason": "abc"},
-                headers=AUTH,
+                headers=auth,
             ).status_code
             == 503
         )

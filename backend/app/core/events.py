@@ -5,7 +5,8 @@ tests, the CLI) subscribe. A bounded ring buffer keeps recent events for the
 timeline API. Handlers run synchronously in the publisher's thread; a failing
 handler is logged and isolated so it can't break the publisher.
 
-The event type names are the shared backend/frontend contract.
+The event type names and payloads are the shared backend/frontend contract
+(``app.core.event_schema``); ``emit`` rejects payloads that don't match it.
 """
 
 from __future__ import annotations
@@ -86,7 +87,9 @@ class EventBus:
     ) -> Event:
         """Publish an event. ``ts`` is *domain* time (observation / window end);
         it defaults to now. Replays therefore stay consistent with their data."""
-        event = Event(type=type_, node_id=node_id, payload=payload)
+        from app.core.event_schema import validate_payload
+
+        event = Event(type=type_, node_id=node_id, payload=validate_payload(type_, payload))
         if ts is not None:
             event.ts = ts
         return self.publish(event)

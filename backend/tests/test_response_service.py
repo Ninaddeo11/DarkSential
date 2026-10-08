@@ -157,7 +157,15 @@ def test_auto_quarantine_and_alert_policy(rt: LabRuntime) -> None:
     node = device(rt, "24:0a:c4:40:00:41", "192.168.50.81")
     pub = rt.response.commander.publisher
     assert isinstance(pub, NullPublisher)
-    rt.bus.emit("RISK_UPDATED", node, ts=T0, action="review_quarantine", level="high", score=60)
+    rt.bus.emit(
+        "RISK_UPDATED",
+        node,
+        ts=T0,
+        action="review_quarantine",
+        level="high",
+        score=60,
+        explanation="HIGH",
+    )
     assert rt.response.list(status="active") == []
     assert json.loads(pub.sent[-1][1])["cmd"] == "ALERT"
     rt.bus.emit(
@@ -176,7 +184,15 @@ def test_auto_quarantine_and_alert_policy(rt: LabRuntime) -> None:
     assert active[0]["evidence"]["score"] == 88
     rt.response.settings = rt.response.settings.model_copy(update={"auto_quarantine": False})
     other = device(rt, "24:0a:c4:40:00:42", "192.168.50.82")
-    rt.bus.emit("RISK_UPDATED", other, ts=T0, action="quarantine", level="critical", score=90)
+    rt.bus.emit(
+        "RISK_UPDATED",
+        other,
+        ts=T0,
+        action="quarantine",
+        level="critical",
+        score=90,
+        explanation="CRITICAL",
+    )
     assert len(rt.response.list(status="active")) == 1
 
 

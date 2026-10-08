@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.events import Event, EventBus
 from app.detect.fingerprint import cpe22_to_23, guess_cpes
@@ -114,24 +116,42 @@ def test_bus_publish_subscribe_history_and_isolation() -> None:
         raise RuntimeError("handler bug")
 
     bus.subscribe(broken)
-    first = bus.emit("DEVICE_CONNECTED", "dev-1", trust="unknown")
+    first = bus.emit("DEVICE_CONNECTED", "dev-1", returning=False, trust="unknown", source="arp")
     for i in range(4):
-        bus.emit("ANOMALY_DETECTED", f"dev-{i}")
+        bus.emit("ANOMALY_DETECTED", f"dev-{i}", kind="anomaly", summary="x")
     assert len(got) == 5  # broken handler didn't stop delivery
     assert [e.type for e in bus.recent()] == ["ANOMALY_DETECTED"] * 3  # ring buffer
     assert bus.recent(node_id="dev-3")[0].node_id == "dev-3"
     assert all(e.seq > first.seq for e in bus.recent(after_seq=first.seq))
     unsubscribe()
-    bus.emit("DEVICE_PROFILED", "dev-x")
+    bus.emit("DEVICE_PROFILED", "dev-x")  # every DEVICE_PROFILED field has a default
     assert len(got) == 5
-    assert first.payload == {"trust": "unknown"}
+    assert first.payload == {
+        "returning": False,
+        "trust": "unknown",
+        "vendor": None,
+        "ip": None,
+        "source": "arp",
+    }  # normalized by the shared schema: defaults filled
     assert first.ts.tzinfo is UTC
+
+
+RISK: dict[str, Any] = {"score": 1.0, "level": "low", "action": "monitor", "explanation": "x"}
+
+
+def test_bus_rejects_payloads_outside_the_contract() -> None:
+    bus = EventBus()
+    with pytest.raises(ValidationError):
+        bus.emit("RISK_UPDATED", "dev-1", **RISK, surprise=1)  # unknown key
+    with pytest.raises(ValidationError):
+        bus.emit("RISK_UPDATED", "dev-1", **(RISK | {"level": "extreme"}))
+    assert bus.recent() == []  # nothing invalid reached subscribers or history
 
 
 def test_bus_thread_safety() -> None:
     bus = EventBus(history=10_000)
     threads = [
-        threading.Thread(target=lambda: [bus.emit("RISK_UPDATED") for _ in range(500)])
+        threading.Thread(target=lambda: [bus.emit("RISK_UPDATED", **RISK) for _ in range(500)])
         for _ in range(8)
     ]
     for t in threads:

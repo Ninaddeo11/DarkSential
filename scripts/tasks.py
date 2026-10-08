@@ -58,8 +58,23 @@ def _ensure_env() -> Path:
             "DSN_DEVICE_ID_HMAC_KEY=\n", f"DSN_DEVICE_ID_HMAC_KEY={secrets.token_urlsafe(48)}\n"
         )
         text = text.replace("change-me-to-a-long-random-password", secrets.token_urlsafe(24))
+        for key in ("DSN_AUTH_JWT_SECRET", "DSN_ADMIN_TOKEN", "DSN_VIEWER_TOKEN"):
+            text = text.replace(f"{key}=\n", f"{key}={secrets.token_urlsafe(32)}\n")
         env_file.write_text(text, encoding="utf-8")
         print("created .env with freshly generated secrets")
+    # Older .env files predate the Phase 6 auth secrets: add any that are missing
+    # or empty (values are never printed).
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    added = []
+    for key in ("DSN_AUTH_JWT_SECRET", "DSN_ADMIN_TOKEN", "DSN_VIEWER_TOKEN"):
+        current = [ln for ln in lines if ln.startswith(f"{key}=")]
+        if not current or current[-1] == f"{key}=":
+            lines = [ln for ln in lines if not ln.startswith(f"{key}=")]
+            lines.append(f"{key}={secrets.token_urlsafe(32)}")
+            added.append(key)
+    if added:
+        env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"generated missing secrets in .env: {', '.join(added)}")
     return env_file
 
 
@@ -106,6 +121,12 @@ def export_reqs() -> None:
 
 
 @task
+def gen_types() -> None:
+    """Regenerate frontend/src/generated/events.ts from the backend event schema."""
+    run(["uv", "run", "python", "../scripts/gen_event_types.py"], cwd=BACKEND)
+
+
+@task
 def typecheck() -> None:
     run(["uv", "run", "mypy"], cwd=BACKEND)
     run([NPM, "run", "typecheck"], cwd=FRONTEND)
@@ -121,8 +142,10 @@ def check() -> None:
     """Everything CI runs."""
     lint()
     typecheck()
+    run(["uv", "run", "python", "../scripts/gen_event_types.py", "--check"], cwd=BACKEND)
     test()
     run([NPM, "run", "build"], cwd=FRONTEND)
+    run([NPM, "test"], cwd=FRONTEND)
 
 
 @task

@@ -9,6 +9,10 @@ streams everything to a real-time 3D command center.
 > and `DSN_OFFLINE_MODE=true` (feeds replay `/fixtures`). No offensive tooling,
 > no exploit code, no Tor crawler.
 
+![The command center during a lab scenario: the smart plug is quarantined (magenta,
+pulsing), its risk waterfall and SHAP comparison are open on the right, and the timeline
+shows the events as they streamed in](docs/img/command-center.png)
+
 ## Status
 
 | Phase | Scope | State |
@@ -19,7 +23,7 @@ streams everything to a real-time 3D command center.
 | 3 | Explainable risk engine | ✅ done |
 | 4 | Quarantine and recovery | ✅ done |
 | 5 | Mosquitto TLS/ACL and the virtual IoT lab | ✅ done |
-| 6 | Real-time API and 3D command center | ⏳ |
+| 6 | Real-time API and 3D command center | ✅ done |
 | 7 | Simulation and evaluation | ⏳ |
 
 ## Quick start
@@ -36,6 +40,7 @@ make demo-phase3    # explainable risk: scored decisions, contributions, evidenc
 make demo-phase4    # quarantine/recovery: refusal, auto-quarantine, reconcile, audit chain
 make demo-phase5    # IoT: telemetry validation, signed commands + acks, broker-log rules
 make lab-up         # the virtual IoT lab (Docker): devices, gateway, real nftables quarantine
+                    # then open http://127.0.0.1:5173 for the 3D command center
 make ablation       # re-run the executed ablation notebook (docs/evaluation/)
 make check          # ruff + mypy --strict + pytest (80% gate) + frontend build
 make docker-test    # full suite on Linux with spaCy + a throwaway Neo4j (needs Docker)
@@ -101,8 +106,9 @@ The repo root is a ready Vercel project: the frontend is served statically from
 
 1. Import the GitHub repo in Vercel. Keep the root directory at the repo root;
    the build settings come from `vercel.json`.
-2. Add the environment variable `DSN_DEVICE_ID_HMAC_KEY` (`make gen-key`). It is
-   the only required one.
+2. Add the environment variables `DSN_DEVICE_ID_HMAC_KEY`, `DSN_AUTH_JWT_SECRET`
+   and `DSN_VIEWER_TOKEN` (each `make gen-key`). Hosted mode runs as production,
+   where every read requires a session: sign in with the viewer token.
 3. Deploy, then check `https://<project>.vercel.app/api/health`.
 
 Hosted mode is **forced** by the entrypoint and is dry-run only:
@@ -225,6 +231,35 @@ The backend also tails the broker log: CONNECT, authentication failures, wildcar
 
 ```bash
 make docker-test-mqtt   # integration tests against a real TLS Mosquitto (Docker)
+```
+
+### Command center (Phase 6)
+
+With the stack or the virtual lab running, open <http://127.0.0.1:5173>:
+
+- **3D network.** Devices around the DSN gateway. Colour = risk level (magenta =
+  quarantined), size = score, a pulse marks new activity. Drag to orbit; click a
+  device (or pick it in the ranked list) to inspect it.
+- **Inspector.** Identity and services; the risk score as a **waterfall** of factor
+  contributions; the XGBoost **SHAP** comparison; the **threat-graph** path (e.g.
+  device → GoAhead 3.6.4 → CVE-2017-17562); and, for operators, **quarantine /
+  release / approve** with a required, audited reason.
+- **Event timeline** (live, filterable) and **feed health**.
+
+Events stream over Socket.IO (`/api/socket.io`). They are batched every 100 ms,
+resumed from the last seen event after a reconnect, and typed by a schema
+generated from the backend (`make gen-types`; CI checks it is current).
+
+**Sign in** (top right) with the operator secret `DSN_ADMIN_TOKEN` or the read-only
+`DSN_VIEWER_TOKEN` (`make setup` generates both into `.env`). The secret is exchanged
+once for a 60-minute session token. Alternatively configure OIDC
+(`DSN_OIDC_ISSUER`, `DSN_OIDC_AUDIENCE`, `DSN_OIDC_JWKS_URL`): tokens carrying the
+`dsn-operator` role are operators. In production every read needs a token. Rate
+limits: logins 10/min, mutations 30/min, reads 600/min per client.
+
+```bash
+cd frontend && npm test     # store, layout, waterfall unit tests
+make dev-frontend           # Vite dev server; DSN_API_PROXY=http://127.0.0.1:8010 for the lab
 ```
 
 ## Configuration

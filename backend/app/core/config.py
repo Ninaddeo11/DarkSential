@@ -138,8 +138,8 @@ class Settings(BaseSettings):
     quarantine_minutes: int = Field(default=30, ge=1, le=7 * 24 * 60)
     # Threat model E1: refuse to quarantine more devices than this at once.
     max_active_quarantines: int = Field(default=10, ge=1, le=1000)
-    # Bearer token for mutating API calls (manual quarantine/release/approve).
-    # Unset -> mutations are disabled. Interim until Phase 6 user auth.
+    # Long-lived login secret: POST /api/auth/login exchanges it for a short-lived
+    # operator session (quarantine / release / approve). Unset -> no operator login.
     admin_token: SecretStr | None = None
     # MQTT client options and the key that signs status-node commands.
     mqtt_tls: bool = True
@@ -151,6 +151,29 @@ class Settings(BaseSettings):
     mqtt_service_clients: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["dsn-backend"]
     )
+
+    # --- Auth + rate limits (Phase 6) ---------------------------------------------
+    # Signs dashboard session JWTs (HS256). Required for login-based sessions.
+    auth_jwt_secret: SecretStr | None = None
+    auth_session_minutes: int = Field(default=60, ge=5, le=24 * 60)
+    # Optional read-only login secret (role viewer).
+    viewer_token: SecretStr | None = None
+    # Require a token for reads (REST + live events). None = production only.
+    auth_reads: bool | None = None
+    # OIDC resource-server mode: verify the IdP's access tokens via its JWKS.
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_roles_claim: str = "roles"
+    oidc_operator_role: str = "dsn-operator"
+    # Per-client token buckets (requests per minute).
+    rate_limit_enabled: bool = True
+    rate_limit_reads_per_minute: int = Field(default=600, ge=1)
+    rate_limit_mutations_per_minute: int = Field(default=30, ge=1)
+    rate_limit_logins_per_minute: int = Field(default=10, ge=1)
+    # Use X-Forwarded-For for the client address (only behind the bundled nginx,
+    # which overwrites the header; otherwise clients could pick their own bucket).
+    trust_proxy_headers: bool = False
 
     # --- Validators ------------------------------------------------------------
     @field_validator("cors_origins", "protected_hosts", "mqtt_service_clients", mode="before")
@@ -191,7 +214,7 @@ class Settings(BaseSettings):
             raise ValueError("darkweb_api_url must use https")
         return url
 
-    @field_validator("admin_token", "mqtt_command_key")
+    @field_validator("admin_token", "mqtt_command_key", "auth_jwt_secret", "viewer_token")
     @classmethod
     def _strong_secret(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and len(value.get_secret_value()) < MIN_HMAC_KEY_BYTES:
@@ -216,6 +239,14 @@ class Settings(BaseSettings):
             raise ValueError("mqtt_username and mqtt_password are required when mqtt_host is set")
         if self.darkweb_api_url and self.darkweb_api_key is None:
             raise ValueError("darkweb_api_key is required when darkweb_api_url is set")
+        oidc = (self.oidc_issuer, self.oidc_audience, self.oidc_jwks_url)
+        if any(oidc) and not all(oidc):
+            raise ValueError("oidc_issuer, oidc_audience and oidc_jwks_url go together")
+        for url in (self.oidc_issuer, self.oidc_jwks_url):
+            if url and urlparse(url).scheme != "https":
+                raise ValueError(f"OIDC URLs must use https: {url}")
+        if (self.admin_token or self.viewer_token) and self.auth_jwt_secret is None:
+            raise ValueError("auth_jwt_secret is required to issue login sessions")
         if self.env == "production":
             insecure = [o for o in self.cors_origins if not o.startswith("https://")]
             if insecure:
@@ -231,6 +262,15 @@ class Settings(BaseSettings):
             if isinstance(value, SecretStr) and value.get_secret_value():
                 values.append(value.get_secret_value())
         return values
+
+    @property
+    def auth_enabled(self) -> bool:
+        """Some way to obtain an operator/viewer token is configured."""
+        return self.auth_jwt_secret is not None or bool(self.oidc_issuer)
+
+    @property
+    def reads_require_auth(self) -> bool:
+        return self.auth_reads if self.auth_reads is not None else self.env == "production"
 
     def is_protected(self, host: IPAddress) -> bool:
         return host in self.protected_hosts

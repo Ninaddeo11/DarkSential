@@ -1,19 +1,21 @@
 """Quarantine control, device approval and the audit log.
 
-Mutating endpoints require ``Authorization: Bearer <DSN_ADMIN_TOKEN>``
-(constant-time compare; bearer tokens aren't sent automatically by browsers, so
-these endpoints aren't CSRF-able). With no admin token configured, mutations are
-disabled outright. Phase 6 replaces this interim token with user auth.
+Mutating endpoints require an **operator** bearer token (a session from
+``POST /api/auth/login`` or an OIDC token with the operator role; see
+``app.core.auth``). Bearer tokens aren't sent automatically by browsers, so
+these endpoints aren't CSRF-able. With no auth configured, mutations are
+disabled outright.
 Every mutation is written to the hash-chained audit log.
 """
 
 from __future__ import annotations
 
-import hmac
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from app.core.auth import OperatorAccess, Principal
 
 router = APIRouter(prefix="/api", tags=["response"])
 
@@ -23,24 +25,6 @@ def _runtime(request: Request) -> Any:
     if runtime is None:
         raise HTTPException(503, "response control is not available in hosted mode")
     return runtime
-
-
-def require_admin(request: Request, authorization: str = Header(default="")) -> str:
-    token = request.app.state.settings.admin_token
-    if token is None:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "mutating API disabled: set DSN_ADMIN_TOKEN to enable"
-        )
-    scheme, _, value = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not hmac.compare_digest(
-        value.encode(), token.get_secret_value().encode()
-    ):
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            "invalid or missing bearer token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return "api:admin"
 
 
 class QuarantineRequest(BaseModel):
@@ -65,7 +49,7 @@ def list_quarantines(
 
 @router.post("/quarantines", status_code=201)
 def create_quarantine(
-    request: Request, body: QuarantineRequest, actor: str = Depends(require_admin)
+    request: Request, body: QuarantineRequest, who: Principal = OperatorAccess
 ) -> dict[str, Any]:
     from app.response.drivers import DriverError
     from app.response.service import QuarantineRefused
@@ -75,7 +59,7 @@ def create_quarantine(
         row: dict[str, Any] = rt.response.quarantine(
             body.node_id,
             f"manual: {body.reason}",
-            actor=actor,
+            actor=who.actor,
             minutes=body.minutes,
             evidence={"manual": True},
         )
@@ -93,14 +77,14 @@ def release_quarantine(
     request: Request,
     quarantine_id: int,
     body: ReleaseRequest,
-    actor: str = Depends(require_admin),
+    who: Principal = OperatorAccess,
 ) -> dict[str, Any]:
     from app.response.drivers import DriverError
 
     rt = _runtime(request)
     try:
         row: dict[str, Any] = rt.response.release(
-            quarantine_id, actor=actor, reason=f"manual: {body.reason}"
+            quarantine_id, actor=who.actor, reason=f"manual: {body.reason}"
         )
     except KeyError as exc:
         raise HTTPException(404, "unknown quarantine") from exc
@@ -111,14 +95,14 @@ def release_quarantine(
 
 @router.post("/devices/{node_id}/approve")
 def approve_device(
-    request: Request, node_id: str, actor: str = Depends(require_admin)
+    request: Request, node_id: str, who: Principal = OperatorAccess
 ) -> dict[str, Any]:
     rt = _runtime(request)
     try:
         view = rt.registry.approve(node_id)
     except KeyError as exc:
         raise HTTPException(404, "unknown device") from exc
-    rt.audit.record(actor, "approve", node_id=node_id, details={"trust": "approved"})
+    rt.audit.record(who.actor, "approve", node_id=node_id, details={"trust": "approved"})
     rt.risk.assess(node_id, trigger="approve")
     data: dict[str, Any] = view.model_dump()
     return data

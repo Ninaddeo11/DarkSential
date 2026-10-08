@@ -22,7 +22,7 @@ Status markers: ✅ implemented · ⏳ planned (phase noted).
 │  detect/ ✅P2 ──► behavior/ ✅P2 ──► risk/ ✅P3 ──► response/ ✅P4 ──► nftables/DRY-RUN  │
 │     ▲   (nmap, ARP/DHCP/mDNS, BLE)     │ explanations                 │                 │
 │     │                                  ▼                              ▼                 │
-│  mqtt/ ✅P4-5 ◄──── telemetry ──── api/ + Socket.IO ⏳P6       audit log (DB)           │
+│  mqtt/ ✅P4-5 ◄──── telemetry ──── api/ + Socket.IO ✅P6       audit log (DB)           │
 │                                                                                        │
 │  core/ ✅ config · logging/redaction · HMAC device IDs · health registry               │
 └───────┬───────────────────┬────────────────────────┬───────────────────────────────────┘
@@ -565,6 +565,95 @@ The formats were captured from a real broker (`fixtures/events/mosquitto.sample.
 - **NAT hides device IPs** outside the lab: if clients reach the broker through NAT (e.g. Docker port publishing), the broker log shows the NAT address. The lab avoids this by routing.
 - **No message-rate limit.** There is no per-client message-rate limit at the broker (see above).
 - **Indicators added later** for a destination a device already contacted are picked up by the 15-min re-score, not immediately.
+
+## Phase 6: real-time API and 3D command center
+
+```
+EventBus.emit(type, node, **payload)
+   │  validate_payload(): pydantic model per type, extra keys rejected
+   ▼
+EventBus ring buffer (2,000) ──► RealtimeHub (any thread → bounded deque)
+                                    │ asyncio task, every 100 ms: ≤1,000 events
+                                    ▼ as ONE "events" message to room "live"
+Socket.IO /api/socket.io ──► browser LiveStore.ingest() ──► reduce() once per
+  auth {token, after_seq}        animation frame ──► React (3D graph, list,
+  → replay seq > after_seq           timeline, inspector)
+  → "resync" if older than buffer ──► reload REST snapshot
+```
+
+**Typed contract.** `app/core/event_schema.py` defines one payload model per
+event type. `EventBus.emit` validates every payload and rejects unknown keys; this
+caught two real mismatches while it was being added (CPE guesses are objects,
+`QUARANTINE_COMPLETED` carries `command_id`). `scripts/gen_event_types.py`
+derives `frontend/src/generated/events.ts` from the models' JSON Schema: a
+discriminated union `DsnEvent` keyed on `type`. CI fails if that file is stale,
+so backend and frontend can't drift silently.
+
+**Live stream.** python-socketio (ASGI) is mounted at `/api/socket.io` in lab
+mode only; a serverless function can't hold sockets.
+
+- **Batching.** Bus handlers only append to a deque; one task flushes batches.
+  A burst of thousands of events becomes a handful of messages.
+- **Resume.** Each (re)connect sends `after_seq`, and the server replays what the
+  client missed. If the gap is older than the ring buffer, it sends `resync`
+  instead of silently losing events. The client reconnects with backoff and
+  jitter (socket.io-client).
+- **Auth.** The same rules as REST reads: a valid token, or anonymous only when
+  reads don't require auth.
+
+**Auth** (`app/core/auth.py`):
+
+- **Sessions.** `POST /api/auth/login` exchanges `DSN_ADMIN_TOKEN` (role
+  operator) or `DSN_VIEWER_TOKEN` (viewer) for an HS256 JWT. It carries iss/aud
+  and expires after 60 min by default.
+- **OIDC.** RS256/ES256 access tokens are verified against `DSN_OIDC_JWKS_URL`
+  with issuer and audience checks. The operator role comes from a configurable
+  claim.
+- **Where it's enforced.**
+  - Mutations need an operator token.
+  - Reads need a token when `DSN_AUTH_READS` is set (default: production).
+  - Health probes are always open.
+- **Audit names.** The audit-log actor is `api:admin` for sessions and
+  `oidc:<sub>` for OIDC.
+
+**Rate limits** (`app/core/ratelimit.py`). Per-client token buckets: logins 10,
+mutations 30 and reads 600 per minute, each configurable. Excess requests get
+`429` with `Retry-After`. The client address comes from `X-Forwarded-For` only
+when `DSN_TRUST_PROXY_HEADERS` is set; the bundled nginx overwrites that header.
+
+**Frontend** (Vite + React 19 + TypeScript strict + @react-three/fiber + drei +
+Tailwind 4):
+
+| Piece | What it does |
+|---|---|
+| `live/store.ts` | Pure `reduce(state, batch)` that sorts by seq, ignores duplicates (resume overlap) and caps history at 5,000 events. `LiveStore` coalesces ingests to one update per animation frame. |
+| `components/Graph3D.tsx` | Force-directed 3D graph around the gateway hub. Colour = risk level (magenta = quarantined), size = score, a pulse ring on recent activity (continuous while quarantined), click to inspect. Positions update imperatively in `useFrame` from preallocated buffers, so motion never re-renders React; three.js is a lazily loaded chunk. |
+| `viz/layout.ts` | Dependency-free force layout: id-seeded positions (stable across reloads), bounded radius, settles to rest. |
+| `components/Inspector.tsx` | Device identity, risk waterfall (contributions sum to the score), XGBoost SHAP chart (comparison only), threat-graph paths, evidence list, and operator controls (quarantine with duration + reason, release, approve). |
+| `components/Timeline.tsx` | Virtualized event log with type filters and a per-device filter. |
+| `components/DeviceList.tsx` | Devices ranked by risk; the keyboard-accessible way to select. |
+| `components/FeedHealth.tsx` | Per-feed status, object counts and age. |
+
+**Measured** (2026-10-08):
+
+- **Store throughput.** 10,000 events across 200 devices applied by the store
+  in **5.1 ms** (vitest, Node). 300 socket messages produced **one** render frame.
+- **Operator round trip.** Clicking *Quarantine* in the browser showed
+  `QUARANTINE_COMPLETED` in the timeline **330 ms** later. Headless Edge against
+  the virtual lab, real nftables in the sandbox, one run.
+
+### Known limitations (Phase 6)
+
+- **Session revocation.** There is no per-session revocation; rotate
+  `DSN_AUTH_JWT_SECRET` to end all sessions.
+- **Local identities.** Local login has two shared roles (admin/viewer), not
+  individual accounts; use OIDC for per-person identities and audit names.
+- **Per-process state.** Rate-limit buckets and the event ring buffer are per
+  process and in memory. A backend restart empties the timeline history; scores,
+  detections and quarantines persist in the database and reload as a snapshot.
+- **Rendering not profiled under load.** The 3D view was not profiled with
+  hundreds of devices. Labels are DOM overlays (one per device), which will cost
+  more than the WebGL scene at that size.
 
 ## Key design decisions
 

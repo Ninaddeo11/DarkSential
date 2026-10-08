@@ -54,6 +54,10 @@ services:
     env_file: ../.env
     environment:
       DSN_API_HOST: 0.0.0.0
+      # nginx (frontend) overwrites X-Forwarded-For with the real client address.
+      # The backend's own port is published on 127.0.0.1 only.
+      DSN_TRUST_PROXY_HEADERS: "true"
+      DSN_CORS_ORIGINS: http://localhost:${DSN_FRONTEND_HOST_PORT:-5173},http://127.0.0.1:${DSN_FRONTEND_HOST_PORT:-5173}
       DSN_DATABASE_URL: sqlite:////srv/data/dsn.sqlite3
       DSN_FIXTURES_DIR: /srv/fixtures
       DSN_CACHE_DIR: /srv/data/cache

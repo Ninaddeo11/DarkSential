@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.8.0] Phase 6: real-time API and 3D command center, 2026-10-08
+
+### Added
+- **Typed event contract** (`app/core/event_schema.py`). There is one payload model per event type, and `EventBus.emit` rejects payloads that don't match. `scripts/gen_event_types.py` generates `frontend/src/generated/events.ts`, and CI fails if that file is stale.
+- **Live stream over Socket.IO** (`/api/socket.io`, lab mode):
+  - batched (100 ms, up to 1,000 events per message);
+  - resumable from `after_seq`, with `resync` when the gap is older than the buffer;
+  - authenticated like REST reads.
+- **Auth:**
+  - `POST /api/auth/login` exchanges `DSN_ADMIN_TOKEN` (operator) or `DSN_VIEWER_TOKEN` (viewer) for an HS256 session JWT;
+  - OIDC access tokens are verified against the provider's JWKS (issuer, audience, role claim);
+  - `GET /api/auth/me`.
+
+  Mutations need the operator role. Reads need a token in production (`DSN_AUTH_READS`).
+- **Rate limits:** per-client token buckets for logins, mutations and reads (`429` + `Retry-After`). Health probes are exempt.
+- **3D command center** (React 19, @react-three/fiber, drei, Tailwind 4):
+  - a force-directed device graph (risk colours, quarantine pulse, click to inspect);
+  - a ranked device list;
+  - an inspector with a risk waterfall, SHAP comparison, threat-graph paths and evidence;
+  - operator controls (quarantine / release / approve);
+  - a virtualized live timeline and feed health.
+
+  Reconnects are handled; renders are coalesced to one per animation frame.
+- **Frontend unit tests** (vitest, run in CI), covering the store, layout and waterfall.
+- **nginx:** WebSocket proxying for the live stream, and an overwritten `X-Forwarded-For`.
+- **`setup`:** fills the missing auth secrets into an existing `.env`.
+
+### Changed
+- `DSN_ADMIN_TOKEN` is no longer accepted as a bearer token. Log in to get a session.
+- Hosted (Vercel) mode now requires a viewer session for reads, so set `DSN_AUTH_JWT_SECRET` and `DSN_VIEWER_TOKEN` there.
+- `cryptography` and `pyjwt` became core dependencies, and `python-socketio` is in the `lab` extra.
+
+### Found while building
+- The strict event schema caught two emitters whose payloads didn't match what the dashboard would expect:
+  - CPE guesses are objects, not strings;
+  - `QUARANTINE_COMPLETED` carries `command_id`.
+- The first 3D graph allocated new GPU buffers every frame and broke memoization. It now updates preallocated buffers in place.
+- The bounded layout never settled: a node pressed against the radius limit kept its outward velocity. Velocity is now the movement that actually happened after clamping.
+
+### Measured (2026-10-08)
+- The live store applied 10,000 events across 200 devices in 5.1 ms (vitest).
+- 300 socket messages produced one render frame.
+- UI quarantine click to `QUARANTINE_COMPLETED` on screen: 330 ms (headless Edge against the virtual lab, one run).
+
+### Known limitations
+- There is no per-session revocation (rotate the JWT secret instead).
+- Local login has two shared roles; use OIDC for per-person identity.
+- Rate-limit buckets and the event history are per process and in memory.
+- The 3D view was not profiled with hundreds of devices.
+
 ## [0.7.0] Pure-software lab: virtual IoT devices replace hardware, 2026-10-08
 
 ### Changed

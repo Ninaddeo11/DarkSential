@@ -17,7 +17,9 @@ SCRIPT = textwrap.dedent(
     """
     import importlib.abc, importlib.util, os, sys
 
-    BLOCKED = {"spacy", "neo4j", "stix2", "stix2patterns", "apscheduler", "sqlalchemy"}
+    BLOCKED = {
+        "spacy", "neo4j", "stix2", "stix2patterns", "apscheduler", "sqlalchemy", "socketio",
+    }
 
     class Blocker(importlib.abc.MetaPathFinder):
         def find_spec(self, name, path=None, target=None):
@@ -28,6 +30,8 @@ SCRIPT = textwrap.dedent(
     sys.meta_path.insert(0, Blocker())
     os.environ["DSN_DEVICE_ID_HMAC_KEY"] = sys.argv[1]
     os.environ["VERCEL_PROJECT_PRODUCTION_URL"] = "dsn.vercel.app"
+    os.environ["DSN_AUTH_JWT_SECRET"] = "hosted-jwt-secret-0123456789abcdef"
+    os.environ["DSN_VIEWER_TOKEN"] = "hosted-viewer-token-0123456789abcd"
 
     spec = importlib.util.spec_from_file_location("vercel_index", sys.argv[2])
     module = importlib.util.module_from_spec(spec)
@@ -38,9 +42,20 @@ SCRIPT = textwrap.dedent(
     with TestClient(module.app) as client:
         assert client.get("/api/health").json()["deployment"] == "hosted"
         assert client.get("/api/health/ready").status_code == 200
-        assert client.get("/api/feeds/status").json()["scheduler"] == "unavailable_hosted"
+        # Internet-facing production: reads need a session, and there is no live socket.
+        assert client.get("/api/feeds/status").status_code == 401
+        sio = {"EIO": "4", "transport": "polling"}
+        assert client.get("/api/socket.io/", params=sio).status_code == 404
+        secret = os.environ["DSN_VIEWER_TOKEN"]
+        login = client.post("/api/auth/login", json={"secret": secret})
+        assert login.json()["role"] == "viewer"
+        auth = {"Authorization": "Bearer " + login.json()["access_token"]}
+        status = client.get("/api/feeds/status", headers=auth).json()
+        assert status["scheduler"] == "unavailable_hosted"
         cpe = "cpe:2.3:a:x:y:*:*:*:*:*:*:*:*"
-        assert client.get("/api/intel/cves", params={"cpe": cpe}).status_code == 503
+        assert client.get("/api/intel/cves", params={"cpe": cpe}, headers=auth).status_code == 503
+        mutate = {"node_id": "dev-0000000000000000", "reason": "abc"}
+        assert client.post("/api/quarantines", json=mutate, headers=auth).status_code == 403
     leaked = sorted(m for m in sys.modules if m.split(".")[0] in BLOCKED)
     assert not leaked, leaked
     print("HOSTED_OK")

@@ -8,8 +8,14 @@ anyio==4.15.1
     # via
     #   starlette
     #   watchfiles
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
 click==8.5.0
     # via uvicorn
+cryptography==50.0.2
+    # via
+    #   darknet-sentinel-nexus
+    #   pyjwt
 fastapi==0.142.2
     # via darknet-sentinel-nexus
 h11==0.16.0
@@ -20,6 +26,8 @@ idna==3.20
     # via anyio
 opentelemetry-api==1.45.0
     # via fastapi
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
 pydantic==2.13.5
     # via
     #   darknet-sentinel-nexus
@@ -28,6 +36,8 @@ pydantic==2.13.5
 pydantic-core==2.46.5
     # via pydantic
 pydantic-settings==2.15.0
+    # via darknet-sentinel-nexus
+pyjwt==2.15.1
     # via darknet-sentinel-nexus
 python-dotenv==1.2.4
     # via
