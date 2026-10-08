@@ -60,9 +60,11 @@ dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "pytest-github-actions-annotate-failures==0.4.2",
+    "requests==2.34.2",
     "ruff==0.16.10",
     "types-defusedxml==0.7.0.20260504",
     "types-pyyaml==6.0.12.20260906",
+    "websocket-client==1.9.2",
 ]
 
 [tool.uv]
@@ -95,6 +97,8 @@ ignore = [
 "tests/**" = ["S101", "S104", "S105", "S106", "S311", "S603", "ANN"]  # seeded RNGs, fixed-arg subprocess, 0.0.0.0 literals in packets
 "app/simulation/**" = ["S311"]  # deterministic seeded simulation, not crypto
 "app/risk/dataset.py" = ["S311"]  # seeded scenario generation, not crypto
+"app/evaluation/report.py" = ["E501"]  # writes long Markdown table rows
+"app/evaluation/harness.py" = ["S311"]  # seeded scenarios, not crypto
 
 # --- mypy ---------------------------------------------------------------------
 [tool.mypy]

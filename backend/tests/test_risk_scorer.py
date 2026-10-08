@@ -24,11 +24,10 @@ def configs(draw: st.DrawFn) -> RiskConfig:
     weights = {f: r / total for f, r in zip(FACTORS, raw, strict=True)}
     if sum(raw) == 0:
         weights = {f: 1 / len(FACTORS) for f in FACTORS}
-    # Absorb float error into the last weight so the sum is exactly 1.
-    weights[FACTORS[-1]] = 1.0 - sum(weights[f] for f in FACTORS[:-1])
-    if weights[FACTORS[-1]] < 0:
-        weights[FACTORS[-1]] = 0.0
-        weights[FACTORS[0]] += 1.0 - sum(weights.values())
+    # Absorb float error into the largest weight (>= 1/len(FACTORS)), so the sum is
+    # exactly 1 and no weight can be pushed below zero.
+    largest = max(weights, key=lambda f: weights[f])
+    weights[largest] += 1.0 - sum(weights.values())
     base = _base()
     return RiskConfig.model_validate({**base, "weights": weights})
 
@@ -71,7 +70,7 @@ def test_extremes(cfg: RiskConfig) -> None:
 def test_levels_and_shipped_config(settings: Settings) -> None:
     cfg = load_risk_config(settings.risk_config_path)
     assert sum(cfg.weights.values()) == pytest.approx(1.0)
-    assert [level_for(s, cfg) for s in (0, 24.99, 25, 49.99, 50, 74.99, 75, 100)] == [
+    assert [level_for(s, cfg) for s in (0, 13.09, 13.1, 19.79, 19.8, 26.39, 26.4, 100)] == [
         "low",
         "low",
         "medium",
@@ -86,7 +85,7 @@ def test_levels_and_shipped_config(settings: Settings) -> None:
         ("threat_intel", 35.0),
         ("vulnerable_service", 20.0),
     ]
-    assert (result.score, result.level) == (55.0, "high")
+    assert (result.score, result.level) == (55.0, "critical")
 
 
 @pytest.mark.parametrize("value", [-0.01, 1.01, float("nan")])

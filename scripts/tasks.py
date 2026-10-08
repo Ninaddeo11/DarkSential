@@ -281,6 +281,28 @@ def demo_phase5() -> None:
 
 
 @task
+def evaluate() -> None:
+    """Phase 7: seeded scenarios, threshold calibration, metrics -> docs/evaluation/phase7 (~25 min)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DSN_")}
+    env["DSN_DEVICE_ID_HMAC_KEY"] = secrets.token_urlsafe(48)
+    run(["uv", "run", "python", "-m", "app.cli", "evaluate"], cwd=BACKEND, env=env)
+
+
+@task
+def evaluate_report() -> None:
+    """Rebuild the Phase 7 plots + summary from the saved CSV/JSON (no re-simulation)."""
+    run(["uv", "run", "python", "-c", "from app.evaluation.report import regenerate; regenerate()"],
+        cwd=BACKEND)
+
+
+@task
+def lab_eval() -> None:
+    """Live end-to-end timings in the running virtual lab -> docs/evaluation/phase7/lab_runs.csv."""
+    run(["uv", "run", "python", "../scripts/lab_eval.py", "--runs", os.environ.get("RUNS", "3")],
+        cwd=BACKEND)
+
+
+@task
 def ablation() -> None:
     """Regenerate and execute docs/evaluation/ablation.ipynb (+ CSVs and plots)."""
     run(["uv", "run", "python", "../scripts/build_ablation_notebook.py"], cwd=BACKEND)

@@ -104,7 +104,10 @@ def cli_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def test_demo_phase3(cli_env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["demo-phase3"]) == 0
     out = capsys.readouterr().out
-    assert "archer-gw      51.0  high     review_quarantine" in out
+    # KEV firmware alone: critical, but a protected host is never quarantined.
+    assert "archer-gw      51.0  critical alert" in out
+    # Flood + C2 contact (corroborated compromise): automatic quarantine.
+    assert "esp32-node     46.4  critical quarantine" in out
     assert "protected host: never quarantined" in out
     assert "contacted 162.243.103.246, a known indicator linked to Emotet" in out
     assert "evidence path: Indicator:ipv4-addr 162.243.103.246 -> INDICATES Malware:Emotet" in out

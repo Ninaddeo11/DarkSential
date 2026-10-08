@@ -24,7 +24,7 @@ shows the events as they streamed in](docs/img/command-center.png)
 | 4 | Quarantine and recovery | ✅ done |
 | 5 | Mosquitto TLS/ACL and the virtual IoT lab | ✅ done |
 | 6 | Real-time API and 3D command center | ✅ done |
-| 7 | Simulation and evaluation | ⏳ |
+| 7 | Simulation and evaluation | ✅ done |
 
 ## Quick start
 
@@ -260,6 +260,49 @@ limits: logins 10/min, mutations 30/min, reads 600/min per client.
 ```bash
 cd frontend && npm test     # store, layout, waterfall unit tests
 make dev-frontend           # Vite dev server; DSN_API_PROXY=http://127.0.0.1:8010 for the lab
+```
+
+### Evaluation (Phase 7)
+
+`make evaluate` runs six seeded scenarios through the real runtime (pipeline, risk engine,
+response service, event bus) on simulated traffic. The scenarios are:
+
+- **normal fleet**: approved devices, no attacks;
+- **unknown device joins**;
+- **MQTT flood**: 500 connections/min;
+- **KEV device + C2 beacon**;
+- **flood + C2**: then quarantine and automatic recovery;
+- **vulnerable device that is never attacked**.
+
+Risk thresholds are derived on seeds 1–10 by a fixed rule; every metric is then measured on
+**held-out** seeds 11–30. Results, CSVs and plots: [docs/evaluation/phase7](docs/evaluation/phase7/README.md).
+
+| Held-out result (20 seeds, 500 devices) | Phase 3 thresholds | calibrated (shipped) |
+|---|---|---|
+| attacked devices that alerted | 66.7% | **100%** |
+| benign devices that alerted | 0% | **0.25%** (1 of 400) |
+| corroborated compromises auto-quarantined | 0% | **100%** |
+| flood-alone, vulnerable-only, unknown or benign devices auto-quarantined | 0% | **0%** |
+| C2 contacts correlated (40) / decoys correlated (60) | 100% / 0% | 100% / 0% |
+| detection after attack start (simulated time) | | median 34–38 s, max 60 s |
+
+What the evaluation changed:
+
+- **The thresholds.** The Phase 3 thresholds made automatic quarantine unreachable: the
+  highest-scoring modelled attack reached 48.2, against a critical threshold of 75. The shipped thresholds are calibrated as follows:
+  - medium 13.1: any attack alerts;
+  - critical 26.4: corroborated evidence only.
+- **Threat intel.** KEV exposure and observed C2 contact now combine as independent
+  evidence instead of a max. Previously, "vulnerable" and "vulnerable and beaconing"
+  scored almost the same.
+- **The quarantine gate.** Automatic quarantine needs **observed evidence of compromise**
+  (a behaviour anomaly or contact with a known indicator). A device that is merely
+  vulnerable can be critical, but it goes to operator review.
+
+```bash
+make evaluate          # ~25 min: calibration + held-out evaluation + live-event latency
+make evaluate-report   # rebuild the plots and summary from the saved CSVs
+make lab-eval          # live end-to-end timings in the running virtual lab
 ```
 
 ## Configuration

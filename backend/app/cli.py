@@ -21,6 +21,7 @@ release NODE_ID          release a device's active quarantine
 audit [--verify]         show / verify the hash-chained audit log
 demo-phase4              offline quarantine / recovery demo
 demo-phase5              offline IoT demo (telemetry, signed commands + acks, broker log)
+evaluate                 Phase 7: seeded scenarios, calibration, metrics -> docs/evaluation/phase7
 """
 
 from __future__ import annotations
@@ -577,6 +578,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("demo-phase3")
     sub.add_parser("demo-phase4")
     sub.add_parser("demo-phase5")
+    ev = sub.add_parser("evaluate")
+    ev.add_argument("--calibration-seeds", default="1-10")
+    ev.add_argument("--eval-seeds", default="11-30")
+    ev.add_argument("--out", type=Path, default=None)
+    ev.add_argument("--no-ws", action="store_true", help="skip the Socket.IO latency run")
     quar = sub.add_parser("quarantine")
     quar.add_argument("node_id")
     quar.add_argument("minutes", nargs="?", type=int)
@@ -607,6 +613,23 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "demo-phase5":
         demo_phase5(settings)
+        return 0
+    if args.cmd == "evaluate":
+        from app.evaluation import report
+
+        evaluation = report.evaluate(
+            report.parse_seeds(args.calibration_seeds),
+            report.parse_seeds(args.eval_seeds),
+            out=args.out or report.OUT,
+            ws=not args.no_ws,
+            progress=lambda m: print(f"== {m}", flush=True),
+        )
+        cal = evaluation["calibrated"]
+        print(
+            f"calibrated thresholds {evaluation['calibration']['suggested']}; alert TPR "
+            f"{cal['alert_tpr']}, FPR {cal['alert_fpr']}; quarantine TPR "
+            f"{cal['quarantine_tpr']}, FPR {cal['quarantine_fpr']}"
+        )
         return 0
     if args.cmd == "scan":
         from app.detect.nmap_scan import scan

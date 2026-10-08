@@ -121,6 +121,73 @@ def test_ioc_contact_correlates_threat(rt: LabRuntime) -> None:
     assert not any(e.kind == "ioc" and "192.168.50." in e.summary for e in intel.evidence)
 
 
+def test_exposure_and_contact_combine_as_independent_evidence(rt: LabRuntime) -> None:
+    gw = node(rt, GATEWAY)
+    before = rt.risk.assess(gw, now=START)
+    assert before is not None
+    exposure = factor(before, "threat_intel").value  # KEV firmware only
+    rt.pipeline.ingest(
+        [
+            TrafficEvent(
+                ts=START + timedelta(seconds=5),
+                src_mac="50:c7:bf:00:00:01",
+                src_ip=GATEWAY,
+                dst_ip=FEODO_C2,
+                dst_port=8080,
+                proto="tcp",
+            )
+        ]
+    )
+    rt.pipeline.flush()
+    after = rt.risk.assess(gw, now=START + timedelta(minutes=1))
+    assert after is not None
+    intel = factor(after, "threat_intel")
+    # Noisy-or across channels, not max: "vulnerable AND beaconing" > "vulnerable".
+    assert intel.value == pytest.approx(1 - (1 - exposure) * (1 - 0.48), abs=1e-3)
+    assert intel.value > exposure
+    assert "CISA KEV" in intel.summary
+    assert FEODO_C2 in intel.summary
+    assert after.score > before.score
+
+
+def test_exposure_alone_never_auto_quarantines(make_settings: SettingsFactory) -> None:
+    # Not protected this time: the gateway is just a vulnerable device here.
+    s = make_settings(protected_hosts=[])
+    runtime = LabRuntime.build(s, load_feeds_config(s.feeds_config_path))
+    runtime.start()
+    try:
+        for feed in ("mitre_attack", "cisa_kev", "nvd_cve", "feodo"):
+            runtime.runner.run(feed)
+        for obs in parse_nmap_xml((FIXTURES / "events" / "lab-scan.nmap.xml").read_bytes()):
+            runtime.registry.observe(obs.model_copy(update={"ts": START}))
+        gw = node(runtime, GATEWAY)
+        exposed = runtime.risk.assess(gw, now=START)
+        assert exposed is not None
+        assert exposed.level == "critical"  # KEV firmware: serious...
+        assert exposed.action == "review_quarantine"  # ...but no sign of compromise
+        assert "exposure only" in exposed.explanation
+        assert runtime.response.list(status="active") == []
+        runtime.pipeline.ingest(
+            [
+                TrafficEvent(
+                    ts=START + timedelta(seconds=5),
+                    src_mac="50:c7:bf:00:00:01",
+                    src_ip=GATEWAY,
+                    dst_ip=FEODO_C2,
+                    dst_port=8080,
+                    proto="tcp",
+                )
+            ]
+        )
+        runtime.pipeline.flush()  # the C2 contact is evidence of compromise
+        latest = runtime.risk.history(gw)[0]
+        assert latest["trigger"] == "IOC_CONTACT"
+        assert latest["action"] == "quarantine"
+        assert len(runtime.response.list(status="active")) == 1
+    finally:
+        runtime.stop()
+
+
 def test_quiet_ioc_contact_is_assessed_immediately(rt: LabRuntime) -> None:
     # One beacon, no anomaly, no rule hit: must not wait for the 15 min re-score.
     esp = node(rt, ESP)

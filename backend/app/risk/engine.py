@@ -68,6 +68,18 @@ class RiskDecision(BaseModel):
     trigger: str
 
 
+def _compromise_evidence(factors: list[Factor]) -> bool:
+    """Observed signs of compromise: anomalous behavior, or contact with a known
+    indicator. Exposure (KEV, vulnerable service) and being unknown are not."""
+    by_name = {f.name: f for f in factors}
+    behavior = any(
+        by_name[n].value > 0 for n in ("rate_anomaly", "protocol_anomaly") if n in by_name
+    )
+    intel = by_name.get("threat_intel")
+    contact = intel is not None and any(e.kind == "ioc" for e in intel.evidence)
+    return behavior or contact
+
+
 def _max(evidence: list[Evidence]) -> float:
     return max((e.value for e in evidence), default=0.0)
 
@@ -316,6 +328,12 @@ class RiskEngine:
     ) -> Factor:
         params = self.cfg.factors
         now = now or self.clock()
+        # Two independent channels: EXPOSURE (the device runs something exploited in
+        # the wild) and CONTACT (it talked to a known indicator). Within a channel the
+        # strongest item counts (the same CVE seen via its actor links isn't counted
+        # twice); across channels they combine as independent evidence. Taking a plain
+        # max across both made "vulnerable" and "vulnerable and beaconing to C2"
+        # nearly indistinguishable (Phase 7 evaluation).
         evidence: list[Evidence] = []
         sources: set[str] = set()
         # (a) KEV: the device runs something that is actively exploited in the wild.
@@ -337,6 +355,8 @@ class RiskEngine:
             # (c) actor/campaign links to that CVE (e.g. via dark-web reports).
             vuln_actors = self.graph.related_from_node(m.vulnerability_id, params.max_hops)
             evidence += self._actor_evidence(vuln_actors, sources)
+        exposure = list(evidence)
+        evidence = []
         # (b) IOC contact: destinations this device talked to within the lookback.
         for dest in self._recent_destinations(node_id, now)[:64]:
             if _is_lab_internal(dest, self.settings):
@@ -366,12 +386,15 @@ class RiskEngine:
                     )
                 )
                 evidence += self._actor_evidence(threats, sources)
-        evidence = sorted(evidence, key=lambda e: -e.value)[:6]
-        value = _max(evidence)
+        contact = evidence
+        value = 1 - (1 - _max(exposure)) * (1 - _max(contact))
+        evidence = sorted(exposure + contact, key=lambda e: -e.value)[:6]
         best_conf = max((e.value for e in evidence), default=0.0)
         if evidence and len(sources) <= 1 and best_conf < params.single_source_min_confidence:
             value = min(value, params.single_source_cap)
-        summary = evidence[0].summary if evidence else "no threat-intel correlation"
+        top = [max(ch, key=lambda e: e.value) for ch in (exposure, contact) if ch]
+        top.sort(key=lambda e: -e.value)
+        summary = "; and ".join(e.summary for e in top) or "no threat-intel correlation"
         return Factor(
             name="threat_intel", value=round(value, 4), summary=summary, evidence=evidence
         )
@@ -415,8 +438,13 @@ class RiskEngine:
             linear = score({f.name: f.value for f in factors}, self.cfg)
             action = self.cfg.actions[linear.level]
             protected = _is_protected(device, self.settings)
+            exposure_only = action == "quarantine" and not _compromise_evidence(factors)
             if protected and action == "quarantine":
                 action = "alert"
+            elif exposure_only:
+                # Being vulnerable is a patching problem, not a compromise: automatic
+                # quarantine needs observed evidence (Phase 7 evaluation).
+                action = "review_quarantine"
             decision = RiskDecision(
                 node_id=node_id,
                 ts=now,
@@ -426,7 +454,13 @@ class RiskEngine:
                 contributions=linear.contributions,
                 factors=factors,
                 explanation=self._explain(
-                    linear.score, linear.level, linear.contributions, factors, action, protected
+                    linear.score,
+                    linear.level,
+                    linear.contributions,
+                    factors,
+                    action,
+                    protected,
+                    exposure_only and not protected,
                 ),
                 evidence_paths=_unique_paths(factors)[:10],
                 ml=self._ml(node_id, now),
@@ -456,6 +490,7 @@ class RiskEngine:
         factors: list[Factor],
         action: str,
         protected: bool,
+        exposure_only: bool = False,
     ) -> str:
         by_name = {f.name: f for f in factors}
         parts = [
@@ -468,6 +503,8 @@ class RiskEngine:
         tail = f". Recommended action: {action}"
         if protected:
             tail += " (protected host: never quarantined)"
+        elif exposure_only:
+            tail += " (exposure only, no sign of compromise: operator decision)"
         return f"{head}: {body}{tail}."
 
     def _persist(self, d: RiskDecision) -> None:

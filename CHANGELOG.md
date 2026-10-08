@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.9.0] Phase 7: simulation and evaluation, 2026-10-08
+
+### Added
+- **Seeded evaluation harness** (`app/evaluation`, `make evaluate`). It runs six scenarios through the real runtime:
+  - normal fleet;
+  - unknown device;
+  - MQTT flood at 500/min;
+  - KEV device + C2 beacon with decoys;
+  - flood + C2 → quarantine → auto-recovery;
+  - a vulnerable device that is never attacked.
+
+  Ground truth is tracked per device. Thresholds are calibrated by a fixed rule on seeds 1–10, and every metric is measured on held-out seeds 11–30. CSVs, plots and a generated summary go to `docs/evaluation/phase7`. `make evaluate-report` rebuilds them from the saved data.
+- **Live event latency** over a real Socket.IO connection (uvicorn + client, loopback).
+- **`make lab-eval`** (`scripts/lab_eval.py`): end-to-end timings in the running virtual lab.
+
+### Changed (driven by the evaluation)
+- **Risk thresholds recalibrated** to medium 13.1, high 19.8 and critical 26.4 (previously 25 / 50 / 75). Under the old values no modelled attack could reach critical (the highest reached 48.2), and a flood from an approved device (16.2) didn't alert.
+- **Threat intel combines exposure (KEV) and contact (IOC) as independent evidence** (noisy-or across the two channels, max within each). "Vulnerable" and "vulnerable and beaconing to C2" now score 34.8 vs 44–48, instead of 34.8 vs 37.8.
+- **Compromise-evidence gate:** the engine recommends automatic quarantine only with observed evidence (a behaviour anomaly or contact with a known indicator). Exposure alone, e.g. KEV firmware scoring 51, goes to `review_quarantine`, and the explanation says why.
+
+### Measured (held-out seeds 11–30, 500 devices)
+
+| metric | before (Phase 3 thresholds) | after |
+|---|---|---|
+| attacks alerted | 66.7% | 100% |
+| benign devices alerted | 0% | 0.25% (1 of 400) |
+| corroborated compromises auto-quarantined | 0% | 100% |
+| flood-alone, vulnerable-only, unknown or benign auto-quarantined | 0% | 0% |
+
+- C2 correlation: 40/40 contacts correlated, 0/60 decoys.
+- Detection after attack start: median 34–38 s (simulated time), max 60 s.
+- Risk assessment: 2.3 ms p50.
+- Quarantine call: 7.3 ms p50 (dry-run driver).
+- Loopback event delivery: 56 ms p50 at a steady rate, 157 ms p50 for a 2,000-event burst.
+
+### Fixed / found during this phase
+- Four measurement bugs in the harness were caught before publishing; each would have produced a wrong number:
+  - pre-approval scores were counted as scenario data;
+  - correlation was read from explanation text;
+  - recovery came out at exactly 0 s because the sweep was phase-aligned with expiry;
+  - quarantine latency came out negative because of bus delivery order.
+- A latent bug in a Hypothesis test strategy could produce a negative weight; it now absorbs float error into the largest weight.
+- The Python Socket.IO client presents the server's own origin on direct WebSocket connections, which CORS rejects. Browsers connecting through nginx are unaffected (verified). The live-lab script now connects through nginx.
+
+### Known limitations
+- All rates come from simulated traffic and describe responses to the modelled signals.
+- The alert threshold (13.1) sits close to normal variation: benign devices reached 12.7 on held-out seeds, and one decoy device reached 17.0 (the false alert).
+- Wall-clock timings are from one Windows machine.
+
 ## [0.8.0] Phase 6: real-time API and 3D command center, 2026-10-08
 
 ### Added

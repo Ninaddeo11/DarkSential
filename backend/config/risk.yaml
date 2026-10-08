@@ -13,11 +13,17 @@ weights:
   vulnerable_service: 0.25  # CVEs matching the device's CPEs (CVSS x match quality)
 
 # Level = highest threshold the score reaches.
+# Calibrated in Phase 7 (docs/evaluation/phase7): derived on seeds 1-10 by a fixed
+# rule, measured on held-out seeds 11-30. Any attack alerts (medium); a single
+# anomaly stays below critical; corroborated evidence (KEV exposure + C2 contact,
+# flood + C2) reaches critical. Automatic quarantine additionally requires observed
+# evidence of compromise (engine gate): exposure alone goes to operator review.
+# Previous (Phase 3) values: medium 25, high 50, critical 75.
 thresholds:
   low: 0
-  medium: 25
-  high: 50
-  critical: 75
+  medium: 13.1
+  high: 19.8
+  critical: 26.4
 
 # Recommended action per level. Protected hosts (DSN_PROTECTED_HOSTS) are never
 # recommended for quarantine: they get "alert" instead.
