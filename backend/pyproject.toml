@@ -108,7 +108,7 @@ plugins = ["pydantic.mypy"]
 # The native parser ships a compiled DLL that Windows Application Control
 # policies may block; the pure-Python parser is portable and fast enough here.
 native_parser = false
-files = ["app", "tests", "../api"]
+files = ["app", "tests", "vercel_app.py"]
 
 [[tool.mypy.overrides]]
 # Untyped third-party packages.

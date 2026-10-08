@@ -1,32 +1,49 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": null,
-  "installCommand": "npm ci --prefix frontend",
-  "buildCommand": "npm run build --prefix frontend",
-  "outputDirectory": "frontend/dist",
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "backend/{app,config}/**",
-      "maxDuration": 10
+  "services": {
+    "backend": {
+      "root": "backend",
+      "framework": "fastapi",
+      "entrypoint": "vercel_app:app",
+      "functions": {
+        "vercel_app.py": {
+          "includeFiles": "config/**",
+          "maxDuration": 10
+        }
+      },
+      "headers": [
+        {
+          "source": "/(.*)",
+          "headers": [{ "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains" }]
+        }
+      ]
+    },
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist",
+      "rewrites": [{ "source": "/((?!.*\\.[A-Za-z0-9]+$).*)", "destination": "/index.html" }],
+      "headers": [
+        {
+          "source": "/(.*)",
+          "headers": [
+            { "key": "X-Content-Type-Options", "value": "nosniff" },
+            { "key": "X-Frame-Options", "value": "DENY" },
+            { "key": "Referrer-Policy", "value": "no-referrer" },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; connect-src 'self' wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'"
+            },
+            { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains" }
+          ]
+        }
+      ]
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Referrer-Policy", "value": "no-referrer" },
-        {
-          "key": "Content-Security-Policy",
-          "value": "default-src 'self'; connect-src 'self' wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'"
-        },
-        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains" }
-      ]
-    }
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }

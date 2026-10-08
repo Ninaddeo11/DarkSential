@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from tests.conftest import TEST_HMAC_KEY, SettingsFactory
 
-ENTRYPOINT = Path(__file__).resolve().parents[2] / "api" / "index.py"
+ENTRYPOINT = Path(__file__).resolve().parents[1] / "vercel_app.py"
 
 
 def _load_entrypoint() -> ModuleType:

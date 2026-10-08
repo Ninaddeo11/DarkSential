@@ -100,12 +100,21 @@ make down
 
 ### Deploy to Vercel (hosted mode)
 
-The repo root is a ready Vercel project: the frontend is served statically from
-`frontend/dist`, and the FastAPI app runs as a Python function at `/api/*`
-([api/index.py](api/index.py), [vercel.json](vercel.json)).
+The repo root is one Vercel project with two
+[services](https://vercel.com/docs/services), defined in [vercel.json](vercel.json):
+
+| Service | Root | Public path | What it is |
+|---|---|---|---|
+| `frontend` | `frontend/` | `/*` | The Vite build, served statically, with SPA fallback to `index.html` |
+| `backend` | `backend/` | `/api/*` | The FastAPI app as a Python function ([backend/vercel_app.py](backend/vercel_app.py)) |
+
+The backend receives the original path (`/api/health`), so its routes are the
+same as in the lab. The browser calls `/api` on the same origin, and neither
+service calls the other server-side, so no service bindings are needed.
+`vercel dev` runs both services locally.
 
 1. Import the GitHub repo in Vercel. Keep the root directory at the repo root;
-   the build settings come from `vercel.json`.
+   the services come from `vercel.json`.
 2. Add the environment variables `DSN_DEVICE_ID_HMAC_KEY`, `DSN_AUTH_JWT_SECRET`
    and `DSN_VIEWER_TOKEN` (each `make gen-key`). Hosted mode runs as production,
    where every read requires a session: sign in with the viewer token.
@@ -119,8 +128,9 @@ deployment (`make up`). Use Vercel for the dashboard. In hosted mode
 `/api/feeds/status` shows configuration only, and `/api/intel/*` returns 503,
 because there is no graph there.
 
-`requirements.txt` at the root is generated from `backend/uv.lock`
-(`make export-reqs`), and CI fails if the two drift apart.
+`backend/requirements.txt` is generated from `backend/uv.lock`
+(`make export-reqs`), and CI fails if the two drift apart. It holds only the
+core dependencies; the `lab` and `ml` extras are never installed on Vercel.
 
 ### Devices & behavior (Phase 2)
 

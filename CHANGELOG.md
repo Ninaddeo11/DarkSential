@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.10.1] Vercel services, 2026-10-09
+
+### Changed
+- **Vercel deploys as two [services](https://vercel.com/docs/services)** in one project:
+  - `frontend` (Vite) is public at `/*`, with SPA fallback for paths that have no file extension;
+  - `backend` (FastAPI) is public at `/api/*`.
+  The backend receives the original path, so its routes are unchanged. Neither service
+  calls the other server-side, so there are no bindings.
+- The hosted entrypoint moved from `api/index.py` to `backend/vercel_app.py`. It still
+  forces hosted, dry-run mode.
+- `requirements.txt` moved to `backend/` (core dependencies only), together with CI's
+  drift check.
+- Security headers are set per service, because `vercel dev` did not apply top-level
+  headers in services mode.
+
+### Known limitations
+- Tested locally with `vercel dev -L` (CLI 63.1.0), not yet on a real deployment.
+  `includeFiles` for `backend/config` inside a service is unverified until then.
+- On Windows, `vercel dev` fails if the `uv` path contains a space (CLI quoting bug).
+
 ## [0.10.0] Multi-page command center, 2026-10-08
 
 ### Added

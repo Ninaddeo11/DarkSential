@@ -1,4 +1,7 @@
-"""Vercel serverless entrypoint: serves the FastAPI app under /api.
+"""Vercel entrypoint for the `backend` service (vercel.json: entrypoint "vercel_app:app").
+
+The service root is backend/, and Vercel passes the original request path, so the
+app keeps serving its routes under /api exactly as in the lab deployment.
 
 Hosted mode is FORCED here, not defaulted: a cloud function cannot reach the lab
 network, so it must never be able to enforce. Settings validation rejects
@@ -13,7 +16,8 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+# The service root (this directory) holds the `app` package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 os.environ["DSN_DEPLOYMENT"] = "hosted"
 os.environ.setdefault("DSN_ENV", "production")

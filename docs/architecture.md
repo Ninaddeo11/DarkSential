@@ -777,7 +777,7 @@ There are two deployment modes (`DSN_DEPLOYMENT`):
 | | `lab` (docker-compose) | `hosted` (Vercel) |
 |---|---|---|
 | Frontend | nginx container | Vercel static (`frontend/dist`) |
-| API | long-running uvicorn | Python serverless function (`api/index.py`) |
+| API | long-running uvicorn | `backend` service: Python function (`backend/vercel_app.py`) at `/api/*` |
 | Enforcement | allowed when `DRY_RUN=false` | **rejected at startup**: dry-run only |
 | Discovery / MQTT / scheduler | yes (later phases) | no (no LAN access, no long-lived processes) |
 | Intended use | full platform | dashboard and read-only intel views |

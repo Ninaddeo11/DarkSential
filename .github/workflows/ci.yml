@@ -45,12 +45,12 @@ jobs:
       - run: uv sync --frozen --all-extras
       - name: ruff
         run: |
-          uv run ruff check . ../api
-          uv run ruff format --check . ../api
-      - name: requirements.txt in sync with uv.lock (Vercel)
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: requirements.txt in sync with uv.lock (Vercel backend service)
         run: |
-          uv export --frozen --no-dev --no-hashes --no-emit-project -q -o ../requirements.txt
-          git diff --exit-code ../requirements.txt
+          uv export --frozen --no-dev --no-hashes --no-emit-project -q -o requirements.txt
+          git diff --exit-code requirements.txt
       - name: mypy (strict)
         run: uv run mypy
       - name: event types shared with the frontend are up to date
