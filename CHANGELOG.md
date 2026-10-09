@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.14.0] Shared active indicator across pages and screens, 2026-10-09
+
+### Added
+- **One IP drives every page.** Enter an IP on Overview, Threat intel, Actors, Malware
+  or Dark web, and the others show the same result (`sim/activeIndicator.ts`).
+  - *Tracking bar:* a "Tracking indicator" bar on every page shows the active IP, with
+    a Clear button.
+  - *Sync:* windows of the same site in the same browser stay in step (`localStorage`
+    plus `BroadcastChannel`), and the IP survives a reload.
+
+### Changed
+- **The lab falls back to the generated scenario** for an IPv4 address the threat graph
+  knows nothing about. Real results still take precedence, and simulated results are
+  tagged.
+
 ## [0.13.0] Live traffic trace and 3D evidence background, 2026-10-09
 
 ### Added

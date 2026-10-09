@@ -35,6 +35,12 @@ export function scenarioFor(ioc: string, hosted: boolean): Scenario | null {
 
 const cache = new Map<string, Scenario>();
 
+/** The scenario behind a lookup result, when the result is simulated. */
+export function scenarioFromResult(ioc: string, result: readonly RelatedThreat[] | null): Scenario | null {
+  if (!result?.some((t) => t.threat_id.startsWith("sim:"))) return null;
+  return scenarioFor(ioc, true);
+}
+
 // --- seeded randomness ---------------------------------------------------------
 
 function fnv1a(text: string): number {

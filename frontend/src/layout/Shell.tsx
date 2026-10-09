@@ -5,6 +5,7 @@ import { TopBar } from "../components/TopBar";
 import { useLive } from "../live/LiveContext";
 import { NexusAccess } from "../components/NexusAccess";
 import { PageTransition } from "../components/PageTransition";
+import { setActiveIndicator, useActiveIndicator } from "../sim/activeIndicator";
 
 interface NavItem {
   to: string;
@@ -29,6 +30,7 @@ const NAV: NavItem[] = [
 /** Page frame: top bar, sidebar navigation and the routed page. */
 export function Shell() {
   const live = useLive();
+  const active = useActiveIndicator();
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
   const nodes = Object.values(live.state.nodes);
@@ -47,6 +49,15 @@ export function Shell() {
         onLogin={live.login}
         onLogout={live.logout}
       />
+      {active && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-critical/30 bg-critical/10 px-4 py-1.5 text-xs" role="status">
+          <span className="live-dot inline-block h-2 w-2 rounded-full bg-critical" />
+          <span className="font-semibold tracking-widest text-critical uppercase">Tracking indicator</span>
+          <span className="font-mono font-semibold">{active}</span>
+          <span className="text-ink-400">shown on Overview, Threat intel, Actors, Malware and Dark web</span>
+          <button type="button" className="ml-auto text-ink-300 underline-offset-2 hover:text-ink-100 hover:underline" onClick={() => setActiveIndicator(null)}>Clear</button>
+        </div>
+      )}
       {live.error && (
         <div className="bg-critical/15 px-4 py-1.5 text-xs text-critical">Backend: {live.error}</div>
       )}

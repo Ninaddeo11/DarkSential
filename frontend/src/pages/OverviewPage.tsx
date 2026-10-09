@@ -6,6 +6,7 @@ import { summarize } from "../components/Timeline";
 import { AssetPosture, ThreatActivity, ThreatGauge } from "../components/CommandTelemetry";
 import { useLive } from "../live/LiveContext";
 import { LEVEL_COLOR, LEVEL_TEXT } from "../viz/colors";
+import { setActiveIndicator, useActiveIndicator } from "../sim/activeIndicator";
 import { isIpLike, scenarioFor } from "../sim/generate";
 import { SIM_IOC, type Scenario } from "../sim/scenario";
 
@@ -26,15 +27,21 @@ export function OverviewPage() {
   const [traceMsg, setTraceMsg] = useState<string | null>(null);
   const [traceSel, setTraceSel] = useState<string | null>(null);
   useEffect(() => { if (health?.deployment === "hosted") setTraceInput((v) => v || SIM_IOC); }, [health?.deployment]);
-  const runTrace = (e: FormEvent) => {
-    e.preventDefault();
-    const value = traceInput.trim();
+  const active = useActiveIndicator();
+  const traceValue = (value: string) => {
     setTraceSel(null);
+    setTraceInput(value);
     // The trace is a simulation in every mode: any IPv4 address shows devices and traffic.
     const found = scenarioFor(value, true);
-    if (found) { setTrace(found); setTraceMsg(null); }
+    if (found) { setTrace(found); setTraceMsg(null); setActiveIndicator(value); }
     else { setTrace(null); setTraceMsg(isIpLike(value) ? `No devices in active communication with ${value}.` : "Enter an IPv4 address to trace."); }
   };
+  const runTrace = (e: FormEvent) => { e.preventDefault(); traceValue(traceInput.trim()); };
+  // Follow the indicator entered on any page (or on the other screen).
+  useEffect(() => {
+    if (active && active !== trace?.ioc) traceValue(active);
+    if (!active && trace) { setTrace(null); setTraceSel(null); }
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!selected) return;
     const timer = window.setTimeout(() => document.querySelector<HTMLButtonElement>('[aria-label="Close inspector"]')?.focus(), 0);
@@ -66,7 +73,7 @@ export function OverviewPage() {
     </header>
     <form className="workspace-query panel" onSubmit={runTrace} aria-label="Trace an indicator">
       <label htmlFor="trace-indicator">TRACE INDICATOR / ACTIVE COMMUNICATIONS</label>
-      <div><span className="terminal-prompt" aria-hidden="true">&#10095;</span><input id="trace-indicator" className="input" value={traceInput} onChange={(e) => setTraceInput(e.target.value)} placeholder="IP address to trace" maxLength={200} /><button className="btn command-action" disabled={!traceInput.trim()}>Trace</button>{trace && <button type="button" className="btn" onClick={() => { setTrace(null); setTraceSel(null); }}>Back to topology</button>}</div>
+      <div><span className="terminal-prompt" aria-hidden="true">&#10095;</span><input id="trace-indicator" className="input" value={traceInput} onChange={(e) => setTraceInput(e.target.value)} placeholder="IP address to trace" maxLength={200} /><button className="btn command-action" disabled={!traceInput.trim()}>Trace</button>{trace && <button type="button" className="btn" onClick={() => { setTrace(null); setTraceSel(null); setActiveIndicator(null); }}>Back to topology</button>}</div>
       {traceMsg && <p className="mt-1 text-xs text-ink-400">{traceMsg}</p>}
     </form>
     <div className="command-hero">

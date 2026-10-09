@@ -1,11 +1,12 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, isHostedMode } from "../api/client";
 import type { CveMatch, RelatedThreat, Rule } from "../api/types";
 import { FeedHealth } from "../components/FeedHealth";
 import { SimInvestigation } from "../components/SimInvestigation";
 import { ThreatGraph } from "../components/ThreatGraph";
 import { useLive } from "../live/LiveContext";
-import { scenarioFor } from "../sim/generate";
+import { setActiveIndicator, useActiveIndicator } from "../sim/activeIndicator";
+import { scenarioFromResult } from "../sim/generate";
 import { SIM_IOC, type Scenario } from "../sim/scenario";
 import { NexusScene } from "../visuals/NexusScene";
 import { graphFromPaths, ENTITY_COLOR } from "../visuals/model";
@@ -49,7 +50,7 @@ export function IntelPage() {
         </div>
       )}
       <div className="grid gap-3 px-4 xl:grid-cols-2">
-        <IocLookup onResult={(result, ioc) => { setRelated(result); setSimulated(result === null ? null : scenarioFor(ioc, isHostedMode())); }} />
+        <IocLookup onResult={(result, ioc) => { setRelated(result); setSimulated(scenarioFromResult(ioc, result)); }} />
         <CveLookup />
       </div>
       {simulated && <div className="px-4"><SimInvestigation scenario={simulated} /></div>}
@@ -85,18 +86,32 @@ function IocLookup({onResult}:{onResult?:(result:RelatedThreat[]|null, ioc:strin
   useEffect(() => {
     if (health?.deployment === "hosted") setIoc((v) => (v === "162.243.103.246" ? SIM_IOC : v));
   }, [health?.deployment]);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const active = useActiveIndicator();
+  const lastRun = useRef<string | null>(null);
+  const run = async (target: string) => {
+    lastRun.current = target;
     setError(null);
     try {
-      const value = await api.relatedThreats(ioc.trim());
+      const value = await api.relatedThreats(target);
       setResult(value);
-      onResult?.(value, ioc);
+      onResult?.(value, target);
+      setActiveIndicator(target);
     } catch (err) {
       setResult(null);
-      onResult?.(null, ioc);
+      onResult?.(null, target);
       setError(err instanceof ApiError ? err.message : String(err));
     }
+  };
+  // Follow the indicator entered on any page (or on the other screen).
+  useEffect(() => {
+    if (active && active !== lastRun.current) {
+      setIoc(active);
+      void run(active);
+    }
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void run(ioc.trim());
   };
   return (
     <section className="panel">

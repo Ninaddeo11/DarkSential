@@ -1,11 +1,11 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { api } from "../api/client";
 import type { RelatedThreat } from "../api/types";
 import { FeedHealth } from "../components/FeedHealth";
 import { SimInvestigation } from "../components/SimInvestigation";
-import { isHostedMode } from "../api/client";
-import { scenarioFor } from "../sim/generate";
+import { setActiveIndicator, useActiveIndicator } from "../sim/activeIndicator";
+import { scenarioFromResult } from "../sim/generate";
 import { SIM_IOC, type Scenario } from "../sim/scenario";
 import { PageHeader } from "../layout/Shell";
 import { useIntelligenceMetadata } from "../hooks/useIntelligenceMetadata";
@@ -39,7 +39,12 @@ export function IntelligenceWorkspace({kind}:{kind:Workspace}) {
   const selectedThreat=(result??[]).find(r=>r.threat_id===selected || r.path.some(p=>p.node_id===selected));
   const count=counts?config.countKeys.reduce((total,k)=>total+(counts[k]??0),0):null;
   const asset=Object.values(state.nodes).find(n=>n.level==='critical'&&n.device.ip)??Object.values(state.nodes).find(n=>n.device.ip);
-  const submit=async(e:FormEvent)=>{e.preventDefault();setLoading(true);setError(null);setSelected(null);try{setResult(await api.relatedThreats(query.trim()));setSimulated(scenarioFor(query,isHostedMode()));}catch(e){setResult(null);setSimulated(null);setError(e instanceof Error?e.message:String(e));}finally{setLoading(false);}};
+  const active=useActiveIndicator();
+  const lastRun=useRef<string|null>(null);
+  const run=async(target:string)=>{lastRun.current=target;setQuery(target);setLoading(true);setError(null);setSelected(null);try{const r=await api.relatedThreats(target);setResult(r);setSimulated(scenarioFromResult(target,r));setActiveIndicator(target);}catch(e){setResult(null);setSimulated(null);setError(e instanceof Error?e.message:String(e));}finally{setLoading(false);}};
+  // Follow the indicator entered on any page (or on the other screen).
+  useEffect(()=>{if(active&&active!==lastRun.current)void run(active);},[active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const submit=(e:FormEvent)=>{e.preventDefault();void run(query.trim());};
   return <div className={`analyst-workspace workspace-${kind}`}><PageHeader title={config.title} subtitle={config.description} />
     <div className="workspace-command-line"><span className="section-eyebrow">{config.eyebrow}</span><span className="technical-badge">{kind==='dark-web'?`SOURCE / ${dark?.mode?.toUpperCase()??'UNAVAILABLE'}`:'READ-ONLY / GRAPH EVIDENCE'}</span></div>
     <div className="workspace-metrics"><div><span>{kind==='dark-web'?'Source feed objects':'Graph inventory objects'}</span><strong>{kind==='dark-web'?dark?.last_run?.objects??'—':count??'—'}</strong></div><div><span>Lookup results</span><strong>{result?result.length:'—'}</strong></div><div><span>{kind==='dark-web'?'Last successful sync':'Relationships in view'}</span><strong className={kind==='dark-web'?'metric-timestamp':''}>{kind==='dark-web'?(dark?.last_success_at?new Date(dark.last_success_at).toLocaleString():'Never'):result?graph.edges.length:'—'}</strong></div><div><span>Evidence source</span><strong className="metric-word">{kind==='dark-web'?dark?.last_run?.status??'Unavailable':result?'Returned paths':'Awaiting lookup'}</strong></div></div>

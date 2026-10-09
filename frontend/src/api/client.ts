@@ -16,7 +16,7 @@ import type {
   Session,
 } from "./types";
 import type { DsnEvent } from "../generated/events";
-import { scenarioFor } from "../sim/generate";
+import { isIpLike, scenarioFor } from "../sim/generate";
 import { SIM_IOC, simulatedCounts } from "../sim/scenario";
 
 // Hosted (Vercel) deployments have no lab: the device, risk, response and intel
@@ -130,7 +130,11 @@ export const api = {
     if (ioc.trim() !== SIM_IOC) await modeReady;
     const simulated = scenarioFor(ioc, hosted);
     if (simulated) return simulated.threats;
-    return lab(() => request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`), []);
+    const real = await lab(() => request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`), []);
+    // Lab: real results win; an IP the graph knows nothing about gets the generated
+    // scenario, so a lab screen and a hosted screen show the same thing.
+    if (real.length === 0 && isIpLike(ioc)) return scenarioFor(ioc, true)?.threats ?? real;
+    return real;
   },
   cves: (cpe: string) => lab(() => request<CveMatch[]>(`/api/intel/cves?cpe=${encodeURIComponent(cpe)}`), []),
   graphCounts: async () => {
