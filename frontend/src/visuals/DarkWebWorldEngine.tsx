@@ -102,10 +102,13 @@ function FloatingArtifact({artifact:a,index,position,tier,reduced,focus,onHover}
     const phase=t.current;
     const x=tier==='mobile'?2.5+(base.x-5)*.7:base.x;
     const y=tier==='mobile'?base.y*.8:base.y;
-    position.set(x+Math.sin(phase*.06)*a.velocity[0]*8,y+Math.sin(phase*a.frequency)*a.amplitude,base.z+Math.sin(phase*.07)*.18+(hover.current?.12:0));
+    // Weapons and narcotics are the featured subjects: they spin slowly and drift wider.
+    const featured=a.category==='weapons'||a.category==='narcotics';
+    const drift=featured?70:8;
+    position.set(x+Math.sin(phase*.06)*a.velocity[0]*drift,y+Math.sin(phase*a.frequency)*a.amplitude*(featured?2.2:1),base.z+Math.sin(phase*.07)*(featured?.6:.18)+(hover.current?.12:0));
     root.current.position.copy(position);
-    model.current.rotation.x=a.rotation[0]+Math.sin(phase*.08)*.04;
-    model.current.rotation.y=a.type==='crypto'?a.rotation[1]+phase*.06:a.rotation[1]+Math.sin(phase*.07)*.07;
+    model.current.rotation.x=a.rotation[0]+Math.sin(phase*.08)*(featured?.12:.04);
+    model.current.rotation.y=a.type==='crypto'?a.rotation[1]+phase*.06:featured?a.rotation[1]+phase*.16*(index%2?1:-1):a.rotation[1]+Math.sin(phase*.07)*.07;
     model.current.rotation.z=a.rotation[2]+Math.cos(phase*.06)*.025;
     root.current.scale.setScalar(THREE.MathUtils.damp(root.current.scale.x,a.scale*(hover.current?1.045:focus?1.03:1),2,dt));
     if(light.current)light.current.intensity=THREE.MathUtils.damp(light.current.intensity,hover.current?4:0,3,dt);

@@ -630,7 +630,7 @@ tr[data-severity]:hover td:first-child { box-shadow: inset 2px 0 #00d9ff; }
 .dark-web-environment > div:first-child { width: 100%; height: 100%; }
 .persistent-world-canvas { position: absolute !important; inset: 0; }
 .world-vignette { position: absolute; inset: 0; background: linear-gradient(90deg,#02060aed 0%,#02060abd 28%,#02060a20 56%,#02060a08 80%,#02060a60),linear-gradient(0deg,#02060a99,transparent 25%,transparent 75%,#02060a55); }
-.world-operations .world-vignette { background: linear-gradient(90deg,#02060a99,#02060a44 55%,#02060a22),linear-gradient(0deg,#02060a88,transparent 50%); }
+.world-operations .world-vignette { background: linear-gradient(90deg,#02060a66,#02060a22 55%,#02060a11),linear-gradient(0deg,#02060a55,transparent 50%); }
 .world-access .world-vignette { background: radial-gradient(ellipse at center,#02060a55,#02060a77 72%); }
 .world-grain { position: absolute; inset: 0; opacity: .025; background-image: repeating-linear-gradient(0deg,#9ed6ef 0 1px,transparent 1px 4px); pointer-events: none; }
 .application-layer { position: relative; z-index: 2; height: 100%; }
@@ -638,9 +638,11 @@ tr[data-severity]:hover td:first-child { box-shadow: inset 2px 0 #00d9ff; }
 .public-header { background: #03080dc2; backdrop-filter: blur(16px); border-color: #729caf22; }
 .command-header { background: #050d15e8; backdrop-filter: blur(16px); box-shadow: 0 1px 32px #0004; }
 .command-nav { background: linear-gradient(180deg,#07111ddd,#03090ee8); backdrop-filter: blur(16px); border-color: #56768d29; }
-.app-shell .panel,.app-shell .command-telemetry .panel { background: linear-gradient(145deg,#0c1823e8,#050b13ed); border-color: #55748a32; box-shadow: inset 0 1px #98c4e906,0 12px 32px #0002; backdrop-filter: blur(12px); }
-.app-shell .threat-command { background: linear-gradient(145deg,#121a23ed,#050b13ed) !important; }
-.app-shell .hero-network { background: #060d14d9; }
+/* Translucent panels: the 3D world (weapons, narcotics, infrastructure) moves behind every page. */
+.app-shell .panel,.app-shell .command-telemetry .panel { background: linear-gradient(145deg,#0c1823b3,#050b13bf); border-color: #55748a32; box-shadow: inset 0 1px #98c4e906,0 12px 32px #0002; backdrop-filter: blur(10px); }
+.app-shell .threat-command { background: linear-gradient(145deg,#121a23bf,#050b13c4) !important; }
+.app-shell .hero-network { background: #060d14a6; }
+.app-shell .command-hero { background: transparent; }
 .app-shell .command-overview { background: #03070b44; }
 .app-shell thead { background: #070e17ed; }
 .page-content,.public-route { animation: none; }

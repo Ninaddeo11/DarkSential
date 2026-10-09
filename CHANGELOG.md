@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.13.0] Live traffic trace and 3D evidence background, 2026-10-09
+
+### Added
+- **Live traffic feed on the Network command center trace:**
+  - a simulated flow appears every ~0.6 s between each device and the traced IP;
+  - each line shows direction, protocol, type (C2 beacon, payload, exfil...) and bytes;
+  - a running total shows the data sent since the trace started.
+- **Any IPv4 address can be traced in every mode, the lab included.** Intel lookups
+  in the lab still return real data.
+- **More detailed background models:**
+  - weapons: a pistol, and an AK-pattern rifle with a wooden stock and curved magazine;
+  - narcotics: taped bricks, powder baggies, and scattered pills and capsules.
+
+### Changed
+- **The background has more weapons and narcotics,** which spin slowly and drift wider.
+- **Dashboard panels are translucent** (about 70%, blurred), so the 3D world moves
+  behind every page.
+
 ## [0.12.0] Simulated results for any IP (hosted), 2026-10-09
 
 ### Added

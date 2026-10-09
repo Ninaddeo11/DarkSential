@@ -2,7 +2,7 @@
 // Country outlines: Natural Earth 1:110m via world-atlas, drawn offline with d3-geo.
 import { geoEquirectangular, geoPath } from "d3-geo";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { feature } from "topojson-client";
 import type { GeometryCollection, Topology } from "topojson-specification";
 import world from "world-atlas/countries-110m.json";
@@ -142,6 +142,77 @@ export function CommsDeviceTable({ scenario, selected, onSelect }: { scenario: S
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+interface Flow {
+  id: number;
+  ts: number;
+  device: SimCommDevice;
+  outbound: boolean;
+  proto: string;
+  bytes: number;
+  kind: string;
+}
+
+const KINDS_OUT = ["C2 beacon", "Heartbeat", "Exfil chunk", "Task result", "Keep-alive"];
+const KINDS_IN = ["Command", "Payload chunk", "Config update", "Task", "ACK"];
+
+/** Live packet flows between the devices and the indicator (simulated). */
+export function TrafficLog({ scenario }: { scenario: Scenario }) {
+  const [flows, setFlows] = useState<Flow[]>([]);
+  const [total, setTotal] = useState(0);
+  const seq = useRef(0); // survives effect re-runs, so row keys stay unique
+  useEffect(() => {
+    setFlows([]);
+    setTotal(0);
+    const tick = () => {
+      // Busier devices (higher packets/min) appear more often.
+      const weights = scenario.comms.map((d) => d.ppm);
+      let roll = Math.random() * weights.reduce((a, b) => a + b, 0);
+      const device = scenario.comms.find((_, i) => (roll -= weights[i]!) < 0) ?? scenario.comms[0]!;
+      const outbound = Math.random() < 0.55;
+      const flow: Flow = {
+        id: ++seq.current,
+        ts: Date.now(),
+        device,
+        outbound,
+        proto: device.channel.split(/[ →]/)[0] ?? "TCP",
+        bytes: outbound ? 120 + Math.floor(Math.random() * 1800) : 300 + Math.floor(Math.random() * 14_000),
+        kind: (outbound ? KINDS_OUT : KINDS_IN)[Math.floor(Math.random() * 5)]!,
+      };
+      setFlows((list) => [flow, ...list].slice(0, 14));
+      setTotal((n) => n + flow.bytes);
+    };
+    for (let i = 0; i < 6; i++) tick();
+    const timer = window.setInterval(tick, 650);
+    return () => window.clearInterval(timer);
+  }, [scenario]);
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[10px] tracking-widest text-ink-400 uppercase">
+        <span><span className="live-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-critical" />Live traffic</span>
+        <span className="font-mono normal-case">{(total / 1024).toFixed(1)} KiB since trace start</span>
+      </div>
+      <div className="scroll-thin max-h-64 overflow-y-auto rounded-md bg-ink-950/70 px-2 py-1 font-mono text-[11px]">
+        {flows.map((f) => (
+          <div key={f.id} className="grid grid-cols-[72px_1fr_90px_110px_70px] gap-2 border-b border-ink-800/60 py-0.5">
+            <span className="text-ink-400">{new Date(f.ts).toLocaleTimeString([], { hour12: false })}</span>
+            <span className="truncate">
+              {f.outbound ? (
+                <>{f.device.ip} <span className="text-critical">→</span> {scenario.ioc}</>
+              ) : (
+                <>{scenario.ioc} <span className="text-signal">→</span> {f.device.ip}</>
+              )}
+              <span className="text-ink-400"> · {f.device.name}, {f.device.country}</span>
+            </span>
+            <span className="text-ink-300">{f.proto}</span>
+            <span className={f.outbound ? "text-high" : "text-signal"}>{f.kind}</span>
+            <span className="text-right text-ink-300">{f.bytes.toLocaleString()} B</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

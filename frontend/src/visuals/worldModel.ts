@@ -1,4 +1,4 @@
-export type ArtifactKind = 'handgun' | 'rifle' | 'case' | 'package' | 'capsules' | 'cargo' | 'vehicle' | 'server' | 'phone' | 'terminal' | 'crypto' | 'identity' | 'malware' | 'fragment';
+export type ArtifactKind = 'handgun' | 'rifle' | 'case' | 'package' | 'capsules' | 'bricks' | 'baggie' | 'pills' | 'cargo' | 'vehicle' | 'server' | 'phone' | 'terminal' | 'crypto' | 'identity' | 'malware' | 'fragment';
 export type WorldLayer = 'landing' | 'intelligence' | 'about' | 'access' | 'operations';
 export interface ThreatArtifact {
   id: string;
@@ -32,6 +32,14 @@ export const WORLD_ARTIFACTS: ThreatArtifact[] = [
   {id:'i-01',type:'identity',category:'identities',position:[3.4,3.8,-9],rotation:[.14,-.25,.24],velocity:[.006,0,.003],scale:1.25,amplitude:.13,frequency:.1,opacity:.65,accent:'#4e8796'},
   {id:'m-01',type:'malware',category:'malware',position:[4,-.1,-7],rotation:[.5,.3,.2],velocity:[.007,0,.005],scale:1.25,amplitude:.18,frequency:.13,opacity:.85,accent:'#836b9e'},
   {id:'x-01',type:'fragment',category:'exploits',position:[10,-4.7,-9],rotation:[.5,.2,.4],velocity:[.006,0,.007],scale:1.5,amplitude:.15,frequency:.11,opacity:.6,accent:'#965260'},
+  {id:'w-03',type:'handgun',category:'weapons',position:[-10.5,2.4,-4],rotation:[.1,.5,.18],velocity:[.011,0,.005],scale:1.7,amplitude:.16,frequency:.13,opacity:.85,accent:'#b0606f'},
+  {id:'w-04',type:'rifle',category:'weapons',position:[8.2,-4.4,-6],rotation:[.12,-.42,.16],velocity:[-.01,0,.004],scale:1.45,amplitude:.13,frequency:.12,opacity:.8,accent:'#8a4b57'},
+  {id:'w-05',type:'handgun',category:'weapons',position:[1.5,5.6,-11],rotation:[.2,-.2,-.3],velocity:[.009,0,.003],scale:1.5,amplitude:.14,frequency:.15,opacity:.6,accent:'#9a5866'},
+  {id:'n-03',type:'bricks',category:'narcotics',position:[-1.8,-4.6,-3],rotation:[.35,.6,.05],velocity:[.008,0,.006],scale:1.3,amplitude:.14,frequency:.12,opacity:.95,accent:'#b28fc4'},
+  {id:'n-04',type:'baggie',category:'narcotics',position:[6.4,1.9,3],rotation:[.15,-.35,.2],velocity:[-.009,0,.005],scale:1.25,amplitude:.2,frequency:.17,opacity:.95,accent:'#c3a0d6'},
+  {id:'n-05',type:'pills',category:'narcotics',position:[-6.6,-.6,1.5],rotation:[.6,.2,.1],velocity:[.01,0,.004],scale:1.4,amplitude:.18,frequency:.14,opacity:.95,accent:'#a07cc0'},
+  {id:'n-06',type:'baggie',category:'narcotics',position:[11.2,-1.4,-12],rotation:[.2,.4,-.3],velocity:[-.007,0,.003],scale:1.3,amplitude:.15,frequency:.11,opacity:.6,accent:'#9677ad'},
+  {id:'n-07',type:'pills',category:'narcotics',position:[-2.4,1.5,-15],rotation:[.5,-.4,.2],velocity:[.008,0,.003],scale:1.5,amplitude:.13,frequency:.1,opacity:.55,accent:'#8a6aa3'},
 ];
 
 export function worldLayer(pathname: string): WorldLayer {
@@ -44,6 +52,6 @@ export function worldLayer(pathname: string): WorldLayer {
 
 export function visibleArtifacts(tier: 'mobile'|'tablet'|'desktop') {
   if(tier==='desktop')return WORLD_ARTIFACTS;
-  const ids=tier==='mobile'?['w-01','n-01','t-01','s-01','c-01','m-01']:['w-01','w-02','n-01','t-01','s-01','s-03','c-01','i-01','m-01','x-01'];
+  const ids=tier==='mobile'?['w-01','w-04','n-01','n-04','n-05','t-01','s-01','c-01','m-01']:['w-01','w-02','w-03','w-04','n-01','n-03','n-04','n-05','t-01','s-01','s-03','c-01','i-01','m-01','x-01'];
   return WORLD_ARTIFACTS.filter(a=>ids.includes(a.id));
 }

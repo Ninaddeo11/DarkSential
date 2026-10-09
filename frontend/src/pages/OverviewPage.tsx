@@ -6,13 +6,13 @@ import { summarize } from "../components/Timeline";
 import { AssetPosture, ThreatActivity, ThreatGauge } from "../components/CommandTelemetry";
 import { useLive } from "../live/LiveContext";
 import { LEVEL_COLOR, LEVEL_TEXT } from "../viz/colors";
-import { isHostedMode } from "../api/client";
 import { isIpLike, scenarioFor } from "../sim/generate";
 import { SIM_IOC, type Scenario } from "../sim/scenario";
 
 const Graph3D = lazy(() => import("../components/Graph3D").then((m) => ({ default: m.Graph3D })));
 const CommsTraceMap = lazy(() => import("../components/CommsTraceMap").then((m) => ({ default: m.CommsTraceMap })));
 const CommsDeviceTable = lazy(() => import("../components/CommsTraceMap").then((m) => ({ default: m.CommsDeviceTable })));
+const TrafficLog = lazy(() => import("../components/CommsTraceMap").then((m) => ({ default: m.TrafficLog })));
 const RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 
 export function OverviewPage() {
@@ -30,7 +30,8 @@ export function OverviewPage() {
     e.preventDefault();
     const value = traceInput.trim();
     setTraceSel(null);
-    const found = scenarioFor(value, isHostedMode());
+    // The trace is a simulation in every mode: any IPv4 address shows devices and traffic.
+    const found = scenarioFor(value, true);
     if (found) { setTrace(found); setTraceMsg(null); }
     else { setTrace(null); setTraceMsg(isIpLike(value) ? `No devices in active communication with ${value}.` : "Enter an IPv4 address to trace."); }
   };
@@ -88,7 +89,7 @@ export function OverviewPage() {
         <div className="threat-actions">{priority && <button ref={inspectButton} className="btn inspect-command" onClick={()=>setSelected(priority.device.node_id)}>Inspect device <span aria-hidden="true">&#8599;</span></button>}<Link className="response-command" to={priority ? `/devices/${priority.device.node_id}` : "/response"}>Review response <span aria-hidden="true">&#8594;</span></Link></div>
       </aside>
     </div>
-    {trace && <section className="panel p-3" aria-label="Devices in active communication"><div className="command-section-title"><div><span className="section-eyebrow">ACTIVE COMMUNICATIONS / {trace.ioc}</span><h2>Devices in active communication</h2></div></div><Suspense fallback={null}><CommsDeviceTable key={trace.ioc} scenario={trace} selected={traceSel} onSelect={(id)=>setTraceSel(s=>s===id?null:id)} /></Suspense></section>}
+    {trace && <section className="panel p-3" aria-label="Devices in active communication"><div className="command-section-title"><div><span className="section-eyebrow">ACTIVE COMMUNICATIONS / {trace.ioc}</span><h2>Devices in active communication</h2></div></div><Suspense fallback={null}><CommsDeviceTable key={trace.ioc} scenario={trace} selected={traceSel} onSelect={(id)=>setTraceSel(s=>s===id?null:id)} /><div className="mt-3"><TrafficLog key={trace.ioc} scenario={trace} /></div></Suspense></section>}
     <nav className="investigation-path" aria-label="Investigation workflow"><span className="path-label">INVESTIGATION PATH</span><button onClick={()=>priority && setSelected(priority.device.node_id)} disabled={!priority}><b>01</b> Threat</button><span aria-hidden="true">/</span><button onClick={()=>{setSelected(null);document.querySelector('.hero-network')?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});}}><b>02</b> Network</button><span aria-hidden="true">/</span><Link to={priority ? `/devices/${priority.device.node_id}` : "/devices"}><b>03</b> Device</Link><span aria-hidden="true">/</span><Link to={priority ? `/events?device=${encodeURIComponent(priority.device.node_id)}` : "/events"}><b>04</b> Event</Link><span aria-hidden="true">/</span><Link to="/response"><b>05</b> Response</Link></nav>
     {selectedNode && <div className="overview-inspection"><Inspector node={selectedNode} role={role} dryRun={health?.dry_run ?? true} onClose={()=>{setSelected(null);inspectButton.current?.focus();}} /></div>}
     <div className="command-telemetry"><ThreatActivity events={state.events} rate={rate} /><AssetPosture nodes={nodes} />

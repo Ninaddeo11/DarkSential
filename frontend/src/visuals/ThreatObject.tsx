@@ -17,20 +17,68 @@ function Strip({size,position=[0,0,0],color}:{size:Vec;position?:Vec;color:strin
   return <mesh position={position}><boxGeometry args={size} /><meshStandardMaterial color={color} emissive={color} emissiveIntensity={.35} roughness={.45} metalness={.5} /></mesh>;
 }
 
-export function FloatingWeapon({rifle=false,accent}:{rifle?:boolean;accent:string}) {
-  const shape=useMemo(()=>{
-    const s=new THREE.Shape();
-    const coords=rifle?[[-1.7,.12],[-1.1,.32],[-.9,.12],[.8,.12],[.8,-.12],[.14,-.12],[.02,-.55],[-.25,-.5],[-.3,-.13],[-.57,-.13],[-.68,-.58],[-.92,-.58],[-.85,-.1],[-1.7,-.1]]:[[-.78,.3],[.78,.3],[.8,.09],[.14,.09],[-.07,-.05],[-.28,-.62],[-.66,-.57],[-.5,-.01],[-.78,.01]];
-    coords.forEach(([x,y],i)=>i?s.lineTo(x!,y!):s.moveTo(x!,y!));s.closePath();return s;
-  },[rifle]);
+const GUNMETAL:Surface={color:'#2b3238',metalness:.82,roughness:.32};
+const STEEL:Surface={color:'#5b6670',metalness:.9,roughness:.25};
+const WOOD:Surface={color:'#6b4528',metalness:.05,roughness:.62};
+const POLYMER:Surface={color:'#1a1f24',metalness:.15,roughness:.7};
+
+function Tube({r,len,position,rotation=[0,0,Math.PI/2],surface=STEEL}:{r:number;len:number;position:Vec;rotation?:Vec;surface?:Surface}){
+  return <mesh position={position} rotation={rotation} castShadow><cylinderGeometry args={[r,r,len,16]} /><meshStandardMaterial {...surface} /></mesh>;
+}
+
+/** Semi-automatic pistol, muzzle toward +x. */
+function Pistol({accent}:{accent:string}){
   return <group>
-    <mesh castShadow receiveShadow><extrudeGeometry args={[shape,{depth:.2,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.024,bevelThickness:.022}]} /><meshStandardMaterial {...METAL} /></mesh>
-    {!rifle&&<><Block size={[1.47,.17,.24]} position={[0,.24,.1]} /><Block size={[.78,.07,.2]} position={[.35,.04,.1]} surface={DARK} /><mesh position={[.805,.19,.1]} rotation={[0,Math.PI/2,0]}><cylinderGeometry args={[.053,.053,.018,12]} /><meshStandardMaterial {...RUBBER} /></mesh><Block size={[.05,.04,.045]} position={[.6,.345,.1]} surface={DARK} /></>}
-    <Block size={rifle?[.2,.36,.23]:[.25,.4,.23]} position={rifle?[-.8,-.32,.1]:[-.44,-.31,.1]} rotation={[0,0,rifle?0:-.27]} surface={RUBBER} />
-    <Strip size={[rifle?1.25:1.3,.012,.012]} position={[rifle?-.2:0,.29,.23]} color={accent} />
-    <mesh position={[rifle?-.18:-.16,-.1,.1]} rotation={[0,0,.2]}><torusGeometry args={[.14,.018,6,16,Math.PI*1.4]} /><meshStandardMaterial {...METAL} /></mesh>
-    {rifle&&<><Block size={[.8,.16,.18]} position={[1.15,.01,.1]} /><Block size={[.17,.3,.16]} position={[.85,.15,.1]} /></>}
-    {[0,1,2,3].map(i=><Block key={i} size={[.025,.13,.012]} position={[-.55+i*.07,.15,.224]} surface={RUBBER} />)}
+    {/* slide with rear serrations, sights and ejection port */}
+    <Block size={[1.5,.24,.21]} position={[.05,.24,0]} surface={GUNMETAL} />
+    {Array.from({length:7},(_,i)=><Block key={i} size={[.018,.2,.215]} position={[-.62+i*.045,.24,0]} surface={POLYMER} />)}
+    <Block size={[.32,.05,.215]} position={[.2,.33,0]} surface={POLYMER} />
+    <Block size={[.05,.06,.06]} position={[.72,.38,0]} surface={GUNMETAL} />
+    <Block size={[.08,.06,.12]} position={[-.62,.38,0]} surface={GUNMETAL} />
+    <Tube r={.048} len={.08} position={[.8,.2,0]} surface={POLYMER} />
+    {/* frame, accessory rail, trigger guard and trigger */}
+    <Block size={[1.12,.15,.19]} position={[.18,.05,0]} surface={POLYMER} />
+    {[0,1,2].map(i=><Block key={i} size={[.06,.03,.2]} position={[.38+i*.1,-.04,0]} surface={POLYMER} />)}
+    <mesh position={[-.06,-.1,0]} rotation={[0,0,Math.PI]}><torusGeometry args={[.15,.026,8,20,Math.PI]} /><meshStandardMaterial {...POLYMER} /></mesh>
+    <Block size={[.04,.14,.05]} position={[-.08,-.06,0]} rotation={[0,0,.25]} surface={STEEL} />
+    {/* angled grip with texture panels and magazine base plate */}
+    <group position={[-.5,-.33,0]} rotation={[0,0,-.26]}>
+      <Block size={[.34,.66,.2]} surface={POLYMER} />
+      {Array.from({length:6},(_,i)=><Block key={i} size={[.24,.022,.205]} position={[0,.22-i*.09,0]} surface={RUBBER} />)}
+      <Block size={[.38,.06,.22]} position={[0,-.35,0]} surface={GUNMETAL} />
+    </group>
+    <Block size={[.08,.07,.12]} position={[-.72,.3,0]} surface={GUNMETAL} />
+    <Strip size={[1.1,.01,.01]} position={[.1,.37,.11]} color={accent} />
+  </group>;
+}
+
+/** AK-pattern assault rifle, muzzle toward +x. */
+function Rifle({accent}:{accent:string}){
+  const stock=useMemo(()=>{
+    const s=new THREE.Shape();
+    [[0,.1],[-1.05,.02],[-1.1,-.36],[-.95,-.38],[0,-.12]].forEach(([x,y],i)=>i?s.lineTo(x!,y!):s.moveTo(x!,y!));
+    s.closePath();return s;
+  },[]);
+  return <group>
+    {/* receiver, dust cover, rear sight */}
+    <Block size={[1.15,.26,.17]} position={[0,0,0]} surface={GUNMETAL} />
+    <Block size={[1.0,.08,.16]} position={[-.05,.16,0]} surface={STEEL} />
+    <Block size={[.16,.07,.12]} position={[.45,.21,0]} surface={GUNMETAL} />
+    {/* wooden handguard, gas tube, barrel, front sight and muzzle brake */}
+    <Block size={[.62,.18,.18]} position={[.88,.0,0]} surface={WOOD} />
+    <Block size={[.5,.09,.15]} position={[.86,.14,0]} surface={WOOD} />
+    <Tube r={.033} len={.75} position={[1.05,.2,0]} surface={GUNMETAL} />
+    <Tube r={.032} len={1.05} position={[1.55,.06,0]} />
+    <Block size={[.05,.16,.05]} position={[1.72,.16,0]} surface={GUNMETAL} />
+    <Tube r={.046} len={.16} position={[2.1,.06,0]} surface={GUNMETAL} />
+    {/* curved 30-round magazine */}
+    {Array.from({length:6},(_,i)=><Block key={i} size={[.2,.14,.13]} position={[.22+i*.045+i*i*.006,-.2-i*.12,0]} rotation={[0,0,.12+i*.07]} surface={GUNMETAL} />)}
+    {/* trigger guard, pistol grip and wooden stock */}
+    <mesh position={[-.12,-.17,0]} rotation={[0,0,Math.PI]}><torusGeometry args={[.13,.022,8,20,Math.PI]} /><meshStandardMaterial {...STEEL} /></mesh>
+    <group position={[-.38,-.3,0]} rotation={[0,0,-.38]}><Block size={[.16,.4,.15]} surface={WOOD} /></group>
+    <mesh position={[-.55,0,-.075]} castShadow><extrudeGeometry args={[stock,{depth:.15,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.02,bevelThickness:.02}]} /><meshStandardMaterial {...WOOD} /></mesh>
+    <Block size={[.05,.48,.17]} position={[-1.65,-.15,0]} surface={RUBBER} />
+    <Strip size={[.9,.01,.01]} position={[-.05,.21,.09]} color={accent} />
   </group>;
 }
 
@@ -42,6 +90,51 @@ export function NarcoticsPackage({accent}:{accent:string}) {
     <Block size={[.35,.25,.018]} position={[.26,.15,.44]} surface={{color:'#7f8b8d',roughness:.95,metalness:0}} />
     <Strip size={[.23,.012,.02]} position={[.26,.19,.455]} color={accent} />
     {[0,1,2,3,4].map(i=><Block key={i} size={[.012,.1,.012]} position={[.16+i*.04,.09,.46]} surface={DARK} />)}
+  </group>;
+}
+
+/** Stack of taped narcotics bricks with stamped logos. */
+function Bricks({accent}:{accent:string}){
+  const tape:Surface={color:'#9a7a4a',metalness:.15,roughness:.45};
+  const bricks:Vec[]=[[-.48,-.17,0],[.48,-.17,0],[0,.17,0],[-.48,-.17,-.58],[.48,-.17,-.58]];
+  return <group>
+    {bricks.map((p,i)=><group key={i} position={p}>
+      <Block size={[.9,.32,.55]} surface={tape} />
+      {[-.28,0,.28].map(x=><Block key={x} size={[.03,.33,.56]} position={[x,0,0]} surface={{color:'#7d6138',metalness:.15,roughness:.5}} />)}
+      <mesh position={[.12,.165,.05]} rotation={[-Math.PI/2,0,0]}><circleGeometry args={[.09,20]} /><meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={.25} roughness={.6} /></mesh>
+      <mesh position={[.12,.166,.05]} rotation={[-Math.PI/2,0,0]}><ringGeometry args={[.1,.115,20]} /><meshStandardMaterial color="#2a1d10" roughness={.8} /></mesh>
+    </group>)}
+  </group>;
+}
+
+/** Zip baggie of white powder. */
+function Baggie({accent}:{accent:string}){
+  return <group>
+    <mesh castShadow><boxGeometry args={[.8,1.0,.08]} /><meshPhysicalMaterial color="#cfe0e8" metalness={0} roughness={.15} transparent opacity={.32} depthWrite={false} /></mesh>
+    <mesh position={[0,-.13,0]} scale={[.33,.3,.07]}><sphereGeometry args={[1,20,14]} /><meshStandardMaterial color="#eef1f2" roughness={.95} /></mesh>
+    <mesh position={[-.12,-.3,.01]} scale={[.22,.12,.05]}><sphereGeometry args={[1,16,10]} /><meshStandardMaterial color="#e6eaeb" roughness={.95} /></mesh>
+    <Block size={[.8,.05,.1]} position={[0,.4,0]} surface={{color:'#b23a48',metalness:.1,roughness:.5}} />
+    <Strip size={[.78,.012,.012]} position={[0,.34,.05]} color={accent} />
+  </group>;
+}
+
+/** Scattered tablets and two-tone capsules. */
+function Pills({accent}:{accent:string}){
+  const colors=['#e8e3d6',accent,'#d9a3b8','#9fd4c8','#f2d27a'];
+  return <group>
+    {Array.from({length:9},(_,i)=>{
+      const a=i*2.39,r=.18+(i%3)*.22;
+      return <mesh key={i} position={[Math.cos(a)*r,Math.sin(a)*r*.6,(i%2)*.06]} rotation={[Math.PI/2+.3*(i%3),0,a]} castShadow>
+        <cylinderGeometry args={[.11,.11,.05,20]} /><meshStandardMaterial color={colors[i%colors.length]} roughness={.55} />
+      </mesh>;
+    })}
+    {Array.from({length:5},(_,i)=>{
+      const a=i*1.3+.6,r=.42+(i%2)*.15;
+      return <group key={i} position={[Math.cos(a)*r,Math.sin(a)*r*.6,.08]} rotation={[0,0,a+.8]}>
+        <mesh position={[0,.07,0]}><capsuleGeometry args={[.055,.12,4,10]} /><meshStandardMaterial color={i%2?'#c0392b':'#2e86c1'} roughness={.35} /></mesh>
+        <mesh position={[0,-.07,0]}><capsuleGeometry args={[.055,.12,4,10]} /><meshStandardMaterial color="#f4f1ea" roughness={.35} /></mesh>
+      </group>;
+    })}
   </group>;
 }
 
@@ -96,8 +189,11 @@ function CyberArtifact({accent,fragment=false}:{accent:string;fragment?:boolean}
 /** Reusable solid forensic models; every asset is generated by the bundler. */
 export function ThreatObject({type,accent}:{type:ArtifactKind;accent:string}){
   switch(type){
-    case 'handgun': return <FloatingWeapon accent={accent} />;
-    case 'rifle': return <FloatingWeapon accent={accent} rifle />;
+    case 'handgun': return <Pistol accent={accent} />;
+    case 'rifle': return <Rifle accent={accent} />;
+    case 'bricks': return <Bricks accent={accent} />;
+    case 'baggie': return <Baggie accent={accent} />;
+    case 'pills': return <Pills accent={accent} />;
     case 'case': return <EvidenceCase accent={accent} />;
     case 'package': return <NarcoticsPackage accent={accent} />;
     case 'capsules': return <Capsules accent={accent} />;
