@@ -5,7 +5,8 @@ import { FeedHealth } from "../components/FeedHealth";
 import { SimInvestigation } from "../components/SimInvestigation";
 import { ThreatGraph } from "../components/ThreatGraph";
 import { useLive } from "../live/LiveContext";
-import { isSimulatedIoc, SIM_IOC } from "../sim/scenario";
+import { scenarioFor } from "../sim/generate";
+import { SIM_IOC, type Scenario } from "../sim/scenario";
 import { NexusScene } from "../visuals/NexusScene";
 import { graphFromPaths, ENTITY_COLOR } from "../visuals/model";
 import { PageHeader } from "../layout/Shell";
@@ -19,7 +20,7 @@ const SEVERITY: Record<string, string> = {
 
 export function IntelPage() {
   const [related,setRelated] = useState<RelatedThreat[]|null>(null);
-  const [simulated, setSimulated] = useState(false);
+  const [simulated, setSimulated] = useState<Scenario | null>(null);
   const graph = graphFromPaths((related??[]).map(t=>t.path));
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
@@ -48,10 +49,10 @@ export function IntelPage() {
         </div>
       )}
       <div className="grid gap-3 px-4 xl:grid-cols-2">
-        <IocLookup onResult={(result, ioc) => { setRelated(result); setSimulated(result !== null && isSimulatedIoc(ioc)); }} />
+        <IocLookup onResult={(result, ioc) => { setRelated(result); setSimulated(result === null ? null : scenarioFor(ioc, isHostedMode())); }} />
         <CveLookup />
       </div>
-      {simulated && <div className="px-4"><SimInvestigation /></div>}
+      {simulated && <div className="px-4"><SimInvestigation scenario={simulated} /></div>}
       <section className="panel intel-relationship-scene mx-4"><div className="command-section-title"><div><span className="section-eyebrow">INTELLIGENCE / RELATIONSHIP PROJECTION</span><h2>Threat relationship graph</h2></div></div><NexusScene title="Threat intelligence relationship graph" nodes={related?graph.nodes:Object.entries(counts??{}).map(([kind,value])=>({id:kind,label:kind,kind,value,color:ENTITY_COLOR[kind]}))} edges={related?graph.edges:[]} caption={related?"OBSERVED / INDICATOR EVIDENCE PATHS":"GRAPH INVENTORY / AGGREGATE OBJECTS"} />{!related&&<p className="scene-explainer">Graph inventory by entity class. Run an indicator lookup above to project its returned relationships.</p>}</section>
       <div className="grid gap-3 px-4 xl:grid-cols-[360px_1fr]">
         <FeedHealth />

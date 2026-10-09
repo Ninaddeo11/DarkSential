@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0] Simulated results for any IP (hosted), 2026-10-09
+
+### Added
+- **Any IPv4 address gets a generated scenario on the hosted site** (`frontend/src/sim/generate.ts`).
+  - *Trace:* the Network command center shows 3 devices in active communication,
+    in 3 countries from a pool of 30, with packet traffic on the map.
+  - *Malware:* the intel pages list 3–5 malicious subdomains, each tied to a malware
+    family (2–4 of 14 real families, with ATT&CK techniques).
+  - *Deterministic:* each scenario is seeded from the address, so the same IP always
+    shows the same result.
+- **Lab mode is unchanged:** only `138.987.22.22` is simulated, and other lookups
+  stay real.
+
+### Notes
+- Generated results carry a "Simulated scenario" tag and a one-line footnote, so a
+  real address typed at a demo isn't presented as a real accusation.
+- Device addresses come from the RFC 5737 documentation ranges, and subdomains are
+  random 10–12 character labels.
+
 ## [0.11.0] Hosted simulation scenario, 2026-10-09
 
 ### Added

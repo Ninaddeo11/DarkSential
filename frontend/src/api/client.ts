@@ -16,7 +16,8 @@ import type {
   Session,
 } from "./types";
 import type { DsnEvent } from "../generated/events";
-import { isSimulatedIoc, simulatedCounts, simulatedThreats } from "../sim/scenario";
+import { scenarioFor } from "../sim/generate";
+import { SIM_IOC, simulatedCounts } from "../sim/scenario";
 
 // Hosted (Vercel) deployments have no lab: the device, risk, response and intel
 // endpoints answer 503 there. Those reads resolve to empty data without a
@@ -124,10 +125,13 @@ export const api = {
       [],
     ),
   rules: () => lab(() => request<Rule[]>("/api/rules"), []),
-  relatedThreats: (ioc: string) =>
-    isSimulatedIoc(ioc)
-      ? Promise.resolve(simulatedThreats())
-      : lab(() => request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`), []),
+  relatedThreats: async (ioc: string) => {
+    // Lab: only the hand-built indicator is simulated; hosted: any IPv4 address.
+    if (ioc.trim() !== SIM_IOC) await modeReady;
+    const simulated = scenarioFor(ioc, hosted);
+    if (simulated) return simulated.threats;
+    return lab(() => request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`), []);
+  },
   cves: (cpe: string) => lab(() => request<CveMatch[]>(`/api/intel/cves?cpe=${encodeURIComponent(cpe)}`), []),
   graphCounts: async () => {
     await modeReady;

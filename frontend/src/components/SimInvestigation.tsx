@@ -1,9 +1,10 @@
-import { formatCoordinate, REPORT } from "../sim/scenario";
+import { formatCoordinate, type Scenario } from "../sim/scenario";
 
 const when = (iso: string) => new Date(iso).toLocaleString();
 
-/** Investigation report for the simulated indicator (see sim/scenario.ts). */
-export function SimInvestigation() {
+/** Investigation report for a simulated indicator (see sim/scenario.ts, sim/generate.ts). */
+export function SimInvestigation({ scenario }: { scenario: Scenario }) {
+  const REPORT = scenario.report;
   const c = REPORT.consignment;
   const btcIn = REPORT.transfers
     .filter((t) => t.asset === "BTC" && t.to.startsWith("bc1qsim…e5cr"))
@@ -16,7 +17,7 @@ export function SimInvestigation() {
           <p className="section-eyebrow">INVESTIGATION / INDICATOR DOSSIER</p>
           <h2 className="mt-1 font-mono text-lg font-semibold">{REPORT.ioc}</h2>
           <p className="mt-0.5 text-xs text-ink-400">
-            {REPORT.hosting} · operated by {REPORT.actor} · active {when(REPORT.firstSeen)} – {when(REPORT.lastSeen)}
+            {REPORT.hosting}{REPORT.actor ? ` · operated by ${REPORT.actor}` : ""} · active {when(REPORT.firstSeen)} – {when(REPORT.lastSeen)}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -29,12 +30,20 @@ export function SimInvestigation() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-4">
-        {[
-          ["Malware families", String(REPORT.malware.length)],
-          ["Crypto transfers", String(REPORT.transfers.length)],
-          ["XMR mined", `${xmr.toFixed(2)} XMR`],
-          ["BTC into escrow", `${btcIn.toFixed(2)} BTC`],
-        ].map(([k, v]) => (
+        {(REPORT.transfers.length
+          ? [
+              ["Malware families", String(REPORT.malware.length)],
+              ["Crypto transfers", String(REPORT.transfers.length)],
+              ["XMR mined", `${xmr.toFixed(2)} XMR`],
+              ["BTC into escrow", `${btcIn.toFixed(2)} BTC`],
+            ]
+          : [
+              ["Malware families", String(REPORT.malware.length)],
+              ["Malicious subdomains", String(REPORT.subdomains.length)],
+              ["Active devices", String(scenario.comms.length)],
+              ["Risk score", `${REPORT.score} / 100`],
+            ]
+        ).map(([k, v]) => (
           <div key={k} className="rounded-md border border-ink-700/70 px-3 py-2">
             <div className="font-mono text-lg font-semibold">{v}</div>
             <div className="text-[10px] tracking-widest text-ink-400 uppercase">{k}</div>
@@ -64,7 +73,30 @@ export function SimInvestigation() {
         </div>
       </div>
 
-      <div>
+      {REPORT.subdomains.length > 0 && (
+        <div>
+          <div className="panel-title px-0">Malicious subdomains resolving to this address</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-left text-[10px] tracking-widest text-ink-400 uppercase">
+                <tr><th className="py-1">Subdomain</th><th>Verdict</th><th>Associated malware</th><th>First seen</th></tr>
+              </thead>
+              <tbody>
+                {REPORT.subdomains.map((s) => (
+                  <tr key={s.host} className="border-t border-ink-800">
+                    <td className="py-1.5 pr-2 font-mono">{s.host}</td>
+                    <td className="pr-2"><span className="chip bg-critical/15 text-critical">malicious</span></td>
+                    <td className="pr-2 font-semibold text-quarantine">{s.malware}</td>
+                    <td className="font-mono text-ink-400">{when(s.firstSeen)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {REPORT.transfers.length > 0 && <div>
         <div className="panel-title px-0">Crypto activity: money trail</div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -87,9 +119,9 @@ export function SimInvestigation() {
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
 
-      <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
+      {c && <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
         <div>
           <div className="panel-title px-0">Narcotics consignment {c.id}</div>
           <dl className="grid grid-cols-[110px_1fr] gap-x-2 gap-y-1.5 text-xs">
@@ -108,12 +140,10 @@ export function SimInvestigation() {
           </dl>
         </div>
         <CoordinatePlot lat={c.lat} lon={c.lon} label={c.id} />
-      </div>
+      </div>}
 
       <p className="text-[10px] leading-relaxed text-ink-400">
-        Simulated scenario for demonstration. Every entity is fictional: the address is not a valid IPv4
-        address, wallet strings contain "sim" and cannot be real Bitcoin addresses, domains use the reserved
-        .invalid suffix, and the consignment position is synthetic.
+        Simulated result generated for demonstration. It is not threat intelligence about this address.
       </p>
     </section>
   );

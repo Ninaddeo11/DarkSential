@@ -118,6 +118,51 @@ export interface SimMalware {
   firstSeen: string;
 }
 
+export interface SimSubdomain {
+  host: string;
+  malware: string;
+  firstSeen: string;
+}
+
+export interface SimConsignment {
+  id: string;
+  lat: number;
+  lon: number;
+  region: string;
+  status: string;
+  lastFix: string;
+  payment: string;
+  listing: string;
+}
+
+export interface SimReport {
+  ioc: string;
+  verdict: string;
+  score: number;
+  firstSeen: string;
+  lastSeen: string;
+  hosting: string;
+  actor: string | null;
+  malware: SimMalware[];
+  subdomains: SimSubdomain[];
+  transfers: SimTransfer[];
+  consignment: SimConsignment | null;
+}
+
+/** Everything one simulated indicator shows: graph paths, dossier and trace map. */
+export interface Scenario {
+  ioc: string;
+  threats: RelatedThreat[];
+  counts: Record<string, number>;
+  report: SimReport;
+  comms: SimCommDevice[];
+  map: {
+    extent: [[number, number], [number, number]]; // [[lon, lat] min, [lon, lat] max]
+    hub: [number, number]; // [lon, lat] where the indicator is drawn (over open sea)
+    countryLabels: { name: string; lon: number; lat: number }[];
+  };
+}
+
 export interface SimTransfer {
   ts: string;
   asset: "XMR" | "BTC";
@@ -128,8 +173,9 @@ export interface SimTransfer {
   tx: string;
 }
 
-export const REPORT = {
+export const REPORT: SimReport & { actor: string; consignment: SimConsignment } = {
   ioc: SIM_IOC,
+  subdomains: [],
   verdict: "Malicious",
   score: 96,
   firstSeen: "2026-09-21T03:14:00Z",
@@ -206,6 +252,8 @@ export interface SimCommDevice {
   role: string;
   /** Packets per minute to/from the indicator (drives the live counters). */
   ppm: number;
+  /** Map label offset from the marker (default: right, above). */
+  label?: { dx: number; dy: number; anchor: "start" | "end" };
 }
 
 export const COMMS: SimCommDevice[] = [
@@ -222,6 +270,7 @@ export const COMMS: SimCommDevice[] = [
     channel: "TLS 443 → C2 panel",
     role: "Botnet operator console: issues Mirai attack and miner commands",
     ppm: 142,
+    label: { dx: 14, dy: -10, anchor: "start" },
   },
   {
     id: "sim:dev:lk-02",
@@ -236,6 +285,8 @@ export const COMMS: SimCommDevice[] = [
     channel: "Tor obfs4 9001 → marketplace",
     role: "Marketplace session and BTC escrow approvals for NX-0427",
     ppm: 37,
+    // Colombo and Kandy are ~100 km apart: one label left/below, one right/below.
+    label: { dx: -14, dy: 24, anchor: "end" },
   },
   {
     id: "sim:dev:lk-03",
@@ -250,8 +301,26 @@ export const COMMS: SimCommDevice[] = [
     channel: "MQTT 1883 / Telnet 23",
     role: "Mozi relay node and XMRig miner reporting to the pool",
     ppm: 268,
+    label: { dx: 14, dy: 24, anchor: "start" },
   },
 ];
+
+/** The hand-built scenario for SIM_IOC. */
+export const HANDCRAFTED: Scenario = {
+  ioc: SIM_IOC,
+  threats: simulatedThreats(),
+  counts: simulatedCounts(),
+  report: REPORT,
+  comms: COMMS,
+  map: {
+    extent: [[18, -4], [104, 66]],
+    hub: [60, 11],
+    countryLabels: [
+      { name: "RUSSIA", lon: 60, lat: 61 },
+      { name: "SRI LANKA", lon: 83.2, lat: 10.6 },
+    ],
+  },
+};
 
 export function formatCoordinate(lat: number, lon: number): string {
   const ns = lat >= 0 ? "N" : "S";
