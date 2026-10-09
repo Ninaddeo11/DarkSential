@@ -17,6 +17,9 @@ const LABEL_COLOR: Record<string, string> = {
   Campaign: "#FF315A",
   Report: "#a78bfa",
   AttackPattern: "#60a5fa",
+  Infrastructure: "#168BFF",
+  Ledger: "#22C55E",
+  Consignment: "#F43F5E",
 };
 
 interface Placed {
@@ -34,7 +37,7 @@ export function ThreatGraph({ paths }: { paths: PathStep[][] }) {
   const placed = new Map<string, Placed>();
   const perCol: number[] = [];
   const links = new Map<string, { from: string; to: string; via: string | null }>();
-  for (const path of paths.slice(0, 8)) {
+  for (const path of paths.slice(0, 12)) {
     path.forEach((step, col) => {
       if (!placed.has(step.node_id)) {
         const row = perCol[col] ?? 0;

@@ -12,7 +12,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { api, ApiError, getToken, setToken } from "../api/client";
+import { api, ApiError, getToken, setHostedMode, setToken } from "../api/client";
 import type { Liveness, Me, Role } from "../api/types";
 import { connectLive, type LinkState } from "./socket";
 import { LiveStore, type LiveState } from "./store";
@@ -60,12 +60,26 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [link, setLink] = useState<LinkState>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState(0); // bump to reload after login/logout
+  const [healthKnown, setHealthKnown] = useState(false);
 
+  // The deployment mode decides how reads behave (hosted: no lab), so it is
+  // known before the snapshot loads.
   useEffect(() => {
-    api.health().then(setHealth).catch(() => setHealth(null));
+    api
+      .health()
+      .then((h) => {
+        setHostedMode(h.deployment === "hosted");
+        setHealth(h);
+      })
+      .catch(() => {
+        setHostedMode(false);
+        setHealth(null);
+      })
+      .finally(() => setHealthKnown(true));
   }, []);
 
   useEffect(() => {
+    if (!healthKnown) return;
     let cancelled = false;
     (async () => {
       try {
@@ -89,7 +103,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, healthKnown]);
 
   useEffect(() => {
     if (authNeeded || !health || health.deployment === "hosted") return;
@@ -156,7 +170,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       me,
       role: me && me.source !== "anonymous" ? me.role : null,
       authNeeded,
-      link: authNeeded ? "unauthorized" : link,
+      link: authNeeded ? "unauthorized" : health?.deployment === "hosted" ? "simulated" : link,
       rate,
       error,
       login,

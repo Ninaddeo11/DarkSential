@@ -1,8 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, isHostedMode } from "../api/client";
 import type { CveMatch, RelatedThreat, Rule } from "../api/types";
 import { FeedHealth } from "../components/FeedHealth";
+import { SimInvestigation } from "../components/SimInvestigation";
 import { ThreatGraph } from "../components/ThreatGraph";
+import { useLive } from "../live/LiveContext";
+import { isSimulatedIoc, SIM_IOC } from "../sim/scenario";
 import { NexusScene } from "../visuals/NexusScene";
 import { graphFromPaths, ENTITY_COLOR } from "../visuals/model";
 import { PageHeader } from "../layout/Shell";
@@ -16,6 +19,7 @@ const SEVERITY: Record<string, string> = {
 
 export function IntelPage() {
   const [related,setRelated] = useState<RelatedThreat[]|null>(null);
+  const [simulated, setSimulated] = useState(false);
   const graph = graphFromPaths((related??[]).map(t=>t.path));
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
@@ -44,9 +48,10 @@ export function IntelPage() {
         </div>
       )}
       <div className="grid gap-3 px-4 xl:grid-cols-2">
-        <IocLookup onResult={setRelated} />
+        <IocLookup onResult={(result, ioc) => { setRelated(result); setSimulated(result !== null && isSimulatedIoc(ioc)); }} />
         <CveLookup />
       </div>
+      {simulated && <div className="px-4"><SimInvestigation /></div>}
       <section className="panel intel-relationship-scene mx-4"><div className="command-section-title"><div><span className="section-eyebrow">INTELLIGENCE / RELATIONSHIP PROJECTION</span><h2>Threat relationship graph</h2></div></div><NexusScene title="Threat intelligence relationship graph" nodes={related?graph.nodes:Object.entries(counts??{}).map(([kind,value])=>({id:kind,label:kind,kind,value,color:ENTITY_COLOR[kind]}))} edges={related?graph.edges:[]} caption={related?"OBSERVED / INDICATOR EVIDENCE PATHS":"GRAPH INVENTORY / AGGREGATE OBJECTS"} />{!related&&<p className="scene-explainer">Graph inventory by entity class. Run an indicator lookup above to project its returned relationships.</p>}</section>
       <div className="grid gap-3 px-4 xl:grid-cols-[360px_1fr]">
         <FeedHealth />
@@ -70,20 +75,25 @@ export function IntelPage() {
   );
 }
 
-function IocLookup({onResult}:{onResult?:(result:RelatedThreat[]|null)=>void}) {
-  const [ioc, setIoc] = useState("162.243.103.246");
+function IocLookup({onResult}:{onResult?:(result:RelatedThreat[]|null, ioc:string)=>void}) {
+  const { health } = useLive();
+  const [ioc, setIoc] = useState(isHostedMode() ? SIM_IOC : "162.243.103.246");
   const [result, setResult] = useState<RelatedThreat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Hosted: there is no lab graph, so start from the simulated indicator.
+  useEffect(() => {
+    if (health?.deployment === "hosted") setIoc((v) => (v === "162.243.103.246" ? SIM_IOC : v));
+  }, [health?.deployment]);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     try {
       const value = await api.relatedThreats(ioc.trim());
       setResult(value);
-      onResult?.(value);
+      onResult?.(value, ioc);
     } catch (err) {
       setResult(null);
-      onResult?.(null);
+      onResult?.(null, ioc);
       setError(err instanceof ApiError ? err.message : String(err));
     }
   };

@@ -11,6 +11,7 @@ const LINK: Record<LinkState, { text: string; cls: string }> = {
   connecting: { text: "CONNECTING", cls: "bg-medium" },
   offline: { text: "RECONNECTING", cls: "bg-high" },
   unauthorized: { text: "SIGN IN", cls: "bg-critical" },
+  simulated: { text: "SIMULATED FEED", cls: "bg-medium" },
 };
 
 interface Props {
@@ -37,11 +38,14 @@ export function TopBar({ health, link, me, nodes, rate, onLogin, onLogout }: Pro
     <header className="command-header flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-ink-700/70 bg-ink-900/90 px-4 py-2.5">
       <Brand compact />
 
-      {health && (
-        <span className={`chip ${health.dry_run ? "bg-low/15 text-low" : "bg-signal/15 text-signal"}`}>
-          {health.dry_run ? "dry run" : "enforcing"}
-        </span>
-      )}
+      {health &&
+        (health.deployment === "hosted" ? (
+          <span className="chip bg-medium/15 text-medium">simulation</span>
+        ) : (
+          <span className={`chip ${health.dry_run ? "bg-low/15 text-low" : "bg-signal/15 text-signal"}`}>
+            {health.dry_run ? "dry run" : "enforcing"}
+          </span>
+        ))}
       <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-widest text-ink-300">
         <span className={`h-2 w-2 rounded-full ${LINK[link].cls} ${link === "live" ? "live-dot" : ""}`} />
         {LINK[link].text}

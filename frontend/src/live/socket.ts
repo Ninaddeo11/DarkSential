@@ -5,7 +5,8 @@
 import { io, type Socket } from "socket.io-client";
 import type { DsnEvent } from "../generated/events";
 
-export type LinkState = "connecting" | "live" | "offline" | "unauthorized";
+/** "simulated": hosted deployment, no stream (data comes from the simulation). */
+export type LinkState = "connecting" | "live" | "offline" | "unauthorized" | "simulated";
 
 export interface LiveLinkOptions {
   token: () => string | null;

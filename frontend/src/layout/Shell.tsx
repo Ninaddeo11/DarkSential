@@ -50,11 +50,6 @@ export function Shell() {
       {live.error && (
         <div className="bg-critical/15 px-4 py-1.5 text-xs text-critical">Backend: {live.error}</div>
       )}
-      {live.health?.deployment === "hosted" && (
-        <div className="bg-medium/10 px-4 py-1.5 text-xs text-medium">
-          Hosted mode: no lab, no live stream. Run the virtual lab (`make lab-up`) for the live view.
-        </div>
-      )}
       <button className="mobile-nav-toggle btn" aria-expanded={navOpen} aria-controls="command-navigation" onClick={() => setNavOpen(!navOpen)}>Navigation</button>
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <nav
@@ -92,7 +87,7 @@ export function Shell() {
               )}
             </NavLink>
           ))}
-          <div className="nav-footer"><Link to="/intelligence" className="scope-navigation">INTELLIGENCE EXPLORER &#8599;</Link><span className="text-signal">{"\u25c7"}</span> SECURITY OPERATIONS<br /><span>IoT intelligence workspace</span><div className="sidebar-link-state"><span className={`status-light ${live.link === "live" ? "live-dot" : ""}`} data-state={live.link} />{live.link === "live" ? "STREAM CONNECTED" : live.link === "connecting" ? "STREAM CONNECTING" : "STREAM DISCONNECTED"}</div></div>
+          <div className="nav-footer"><Link to="/intelligence" className="scope-navigation">INTELLIGENCE EXPLORER &#8599;</Link><span className="text-signal">{"\u25c7"}</span> SECURITY OPERATIONS<br /><span>IoT intelligence workspace</span><div className="sidebar-link-state"><span className={`status-light ${live.link === "live" ? "live-dot" : ""}`} data-state={live.link} />{live.link === "live" ? "STREAM CONNECTED" : live.link === "simulated" ? "SIMULATED DATA" : live.link === "connecting" ? "STREAM CONNECTING" : "STREAM DISCONNECTED"}</div></div>
         </nav>
         <main className="scroll-thin min-h-0 min-w-0 flex-1 overflow-y-auto">
           {live.authNeeded ? (

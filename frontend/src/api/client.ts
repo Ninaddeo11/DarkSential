@@ -16,6 +16,29 @@ import type {
   Session,
 } from "./types";
 import type { DsnEvent } from "../generated/events";
+import { isSimulatedIoc, simulatedCounts, simulatedThreats } from "../sim/scenario";
+
+// Hosted (Vercel) deployments have no lab: the device, risk, response and intel
+// endpoints answer 503 there. Those reads resolve to empty data without a
+// request, and the intel graph is the simulated scenario.
+let hosted = false;
+let modeKnown!: () => void;
+// Settles once the deployment mode is known, so first-render reads don't race it.
+const modeReady = new Promise<void>((resolve) => (modeKnown = resolve));
+
+export function setHostedMode(on: boolean): void {
+  hosted = on;
+  modeKnown();
+}
+
+export function isHostedMode(): boolean {
+  return hosted;
+}
+
+async function lab<T>(call: () => Promise<T>, fallback: T): Promise<T> {
+  await modeReady;
+  return hosted ? fallback : call();
+}
 
 // Session token: sessionStorage (dies with the tab) wrapped so a blocked storage
 // (private mode, sandboxed iframe) degrades to in-memory instead of crashing.
@@ -72,10 +95,10 @@ export const api = {
   me: () => request<Me>("/api/auth/me"),
   login: (secret: string) =>
     request<Session>("/api/auth/login", { method: "POST", body: JSON.stringify({ secret }) }),
-  devices: () => request<Device[]>("/api/devices"),
-  risks: () => request<RiskDecision[]>("/api/risk"),
+  devices: () => lab(() => request<Device[]>("/api/devices"), []),
+  risks: () => lab(() => request<RiskDecision[]>("/api/risk"), []),
   risk: (nodeId: string) => request<RiskDetail>(`/api/risk/${encodeURIComponent(nodeId)}`),
-  quarantines: () => request<Quarantine[]>("/api/quarantines?limit=200"),
+  quarantines: () => lab(() => request<Quarantine[]>("/api/quarantines?limit=200"), []),
   events: (limit = 500) => request<DsnEvent[]>(`/api/events?limit=${limit}`),
   feeds: () => request<FeedsStatus>("/api/feeds/status", {}, true),
   quarantine: (nodeId: string, reason: string, minutes: number) =>
@@ -91,18 +114,27 @@ export const api = {
   approve: (nodeId: string) =>
     request<Device>(`/api/devices/${encodeURIComponent(nodeId)}/approve`, { method: "POST" }),
   quarantinesByStatus: (status?: "active" | "released" | "failed") =>
-    request<Quarantine[]>(`/api/quarantines?limit=200${status ? `&status=${status}` : ""}`),
+    lab(() => request<Quarantine[]>(`/api/quarantines?limit=200${status ? `&status=${status}` : ""}`), []),
   detections: (nodeId?: string, limit = 100) =>
-    request<Detection[]>(
-      `/api/detections?limit=${limit}${nodeId ? `&node_id=${encodeURIComponent(nodeId)}` : ""}`,
+    lab(
+      () =>
+        request<Detection[]>(
+          `/api/detections?limit=${limit}${nodeId ? `&node_id=${encodeURIComponent(nodeId)}` : ""}`,
+        ),
+      [],
     ),
-  rules: () => request<Rule[]>("/api/rules"),
+  rules: () => lab(() => request<Rule[]>("/api/rules"), []),
   relatedThreats: (ioc: string) =>
-    request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`),
-  cves: (cpe: string) => request<CveMatch[]>(`/api/intel/cves?cpe=${encodeURIComponent(cpe)}`),
-  graphCounts: () => request<Record<string, number>>("/api/intel/graph/counts"),
+    isSimulatedIoc(ioc)
+      ? Promise.resolve(simulatedThreats())
+      : lab(() => request<RelatedThreat[]>(`/api/intel/related-threats?ioc=${encodeURIComponent(ioc)}`), []),
+  cves: (cpe: string) => lab(() => request<CveMatch[]>(`/api/intel/cves?cpe=${encodeURIComponent(cpe)}`), []),
+  graphCounts: async () => {
+    await modeReady;
+    return hosted ? simulatedCounts() : request<Record<string, number>>("/api/intel/graph/counts");
+  },
   riskModel: () =>
     request<{ linear: { thresholds: Partial<Record<RiskLevel, number>> } }>("/api/risk/model"),
-  audit: (limit = 100) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
+  audit: (limit = 100) => lab(() => request<AuditEntry[]>(`/api/audit?limit=${limit}`), []),
   auditVerify: () => request<AuditVerify>("/api/audit/verify"),
 };

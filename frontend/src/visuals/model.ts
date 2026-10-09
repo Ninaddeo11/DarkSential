@@ -17,6 +17,7 @@ export const ENTITY_COLOR: Record<string, string> = {
   Observable: "#00D9FF", Vulnerability: "#FF9F2D", CPE: "#8EA3B2",
   Malware: "#A855F7", IntrusionSet: "#A855F7", ThreatActor: "#A855F7",
   Identity: "#168BFF", Report: "#8EA3B2", AttackPattern: "#A855F7",
+  Ledger: "#22C55E", Consignment: "#F43F5E",
 };
 
 /** Preserve the backend's entity IDs and relationships; limit only the visual projection. */

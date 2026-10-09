@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.11.0] Hosted simulation scenario, 2026-10-09
+
+### Added
+- **Simulated investigation for `138.987.22.22`** (`frontend/src/sim/scenario.ts`).
+  - *Threat graph:* the indicator links to 4 malware families (Mirai variant, Mozi,
+    an XMRig coinminer, RedLine), C2 and hosting infrastructure, an actor, and a
+    marketplace listing. A crypto money trail runs through mining payouts, drained
+    wallets, a mixer and escrow to a payment for narcotics consignment NX-0427,
+    at 18.5204° N, 66.0412° E.
+  - *Where it appears:* Threat intel, Actors, Malware and Dark web, with a full
+    dossier (`SimInvestigation`).
+- **Indicator trace on the Network command center.** Tracing the indicator shows 3
+  devices in active communication, Device 1 in Moscow (Russia) and Devices 2 and 3
+  in Colombo and Kandy (Sri Lanka).
+  - *Map:* a geographic trace (Natural Earth 1:110m via `world-atlas` and `d3-geo`,
+    rendered offline) with animated links.
+  - *Table:* each device with live packet counters.
+  - *Posture:* the panel switches to the traced indicator.
+
+### Changed
+- **Hosted (Vercel) mode no longer shows errors or banners.**
+  - Reads the deployment can't serve (devices, risk, response, intel) resolve to
+    empty data without a request.
+  - The top bar shows SIMULATION and the stream status SIMULATED FEED.
+  - In the lab, the dry-run / enforcing badge is unchanged.
+
+### Known limitations
+- The scenario is fixed data, and only that one indicator is simulated.
+- Every identifier is synthetic:
+  - `138.987.22.22` is not a valid IPv4 address;
+  - device addresses are from the RFC 5737 documentation ranges;
+  - wallet strings contain `sim`, which no real Bitcoin address can;
+  - domains use `.invalid`.
+
 ## [0.10.1] Vercel services, 2026-10-09
 
 ### Changed
